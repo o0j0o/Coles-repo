@@ -1,0 +1,16 @@
+{
+  "name": "fence-estimator",
+  "version": "1.0.0",
+  "description": "Fence material and cost estimator with a materials/supplier database. Web based and iPhone friendly.",
+  "main": "server.js",
+  "private": true,
+  "engines": {
+    "node": ">=22.5"
+  },
+  "scripts": {
+    "start": "node --no-warnings server.js",
+    "dev": "node --no-warnings --watch server.js",
+    "test": "node --no-warnings --test test/*.test.js"
+  },
+  "license": "UNLICENSED"
+}
