@@ -304,27 +304,106 @@
     });
   }
 
-  async function uploadImage(file) {
-    const url = URL.createObjectURL(file);
-    try {
-      const img = await new Promise((resolve, reject) => {
-        const i = new Image();
-        i.onload = () => resolve(i);
-        i.onerror = () => reject(new Error('This image format could not be read. Try a JPEG or PNG (or a screenshot of the drawing).'));
-        i.src = url;
+  const MAX_UPLOAD_PX = 2400;
+  let pdfjsLoading = null;
+
+  function isPdf(file) {
+    return file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '');
+  }
+
+  // PDF.js is only downloaded the first time someone picks a PDF.
+  function loadPdfJs() {
+    if (!pdfjsLoading) {
+      pdfjsLoading = import('/vendor/pdfjs/pdf.min.mjs').then(m => {
+        m.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/pdf.worker.min.mjs';
+        return m;
       });
-      const max = 2400;
-      const k = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
-      const w = Math.round(img.naturalWidth * k), h = Math.round(img.naturalHeight * k);
+      pdfjsLoading.catch(() => { pdfjsLoading = null; });
+    }
+    return pdfjsLoading;
+  }
+
+  // Render one page of a PDF (e.g. a sketch exported from Notes) to a canvas.
+  async function pdfToCanvas(file) {
+    const pdfjs = await loadPdfJs();
+    const task = pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) });
+    try {
+      const doc = await task.promise;
+      let n = 1;
+      if (doc.numPages > 1) {
+        const ans = parseInt(prompt(`This PDF has ${doc.numPages} pages. Which page has the fence drawing?`, '1'), 10);
+        if (ans >= 1 && ans <= doc.numPages) n = ans;
+      }
+      const page = await doc.getPage(n);
+      const base = page.getViewport({ scale: 1 });
+      const vp = page.getViewport({ scale: Math.min(4, MAX_UPLOAD_PX / Math.max(base.width, base.height)) });
       const cv = document.createElement('canvas');
-      cv.width = w; cv.height = h;
-      const ctx = cv.getContext('2d');
-      ctx.fillStyle = '#fff';
-      ctx.fillRect(0, 0, w, h);
-      ctx.drawImage(img, 0, 0, w, h);
-      const r = await api('POST', '/api/uploads', { dataUrl: cv.toDataURL('image/jpeg', 0.85) });
-      return { url: r.url, w, h };
-    } finally { URL.revokeObjectURL(url); }
+      cv.width = Math.floor(vp.width);
+      cv.height = Math.floor(vp.height);
+      await page.render({ canvas: cv, viewport: vp, background: '#ffffff' }).promise;
+      return trimWhitespace(cv);
+    } finally {
+      task.destroy();
+    }
+  }
+
+  // Crop blank page margins so a small sketch on a big page fills the screen.
+  function trimWhitespace(cv) {
+    const { width: w, height: h } = cv;
+    const px = cv.getContext('2d').getImageData(0, 0, w, h).data;
+    let x0 = w, y0 = h, x1 = -1, y1 = -1;
+    for (let y = 0; y < h; y += 2) {
+      for (let x = 0; x < w; x += 2) {
+        const i = (y * w + x) * 4;
+        if (px[i] < 235 || px[i + 1] < 235 || px[i + 2] < 235) {
+          if (x < x0) x0 = x;
+          if (x > x1) x1 = x;
+          if (y < y0) y0 = y;
+          if (y > y1) y1 = y;
+        }
+      }
+    }
+    if (x1 < 0) return cv; // blank page
+    const pad = Math.round(Math.max(w, h) * 0.03);
+    x0 = Math.max(0, x0 - pad); y0 = Math.max(0, y0 - pad);
+    x1 = Math.min(w, x1 + pad); y1 = Math.min(h, y1 + pad);
+    if ((x1 - x0) * (y1 - y0) > w * h * 0.85) return cv; // not worth cropping
+    const out = document.createElement('canvas');
+    out.width = x1 - x0; out.height = y1 - y0;
+    out.getContext('2d').drawImage(cv, x0, y0, out.width, out.height, 0, 0, out.width, out.height);
+    return out;
+  }
+
+  function loadImage(file) {
+    const url = URL.createObjectURL(file);
+    return new Promise((resolve, reject) => {
+      const i = new Image();
+      i.onload = () => resolve(i);
+      i.onerror = () => reject(new Error('This file could not be read. Try a JPEG, PNG or PDF (or a screenshot of the drawing).'));
+      i.src = url;
+    }).finally(() => URL.revokeObjectURL(url));
+  }
+
+  // Accepts a photo, screenshot or PDF. Shrinks it and stores it on the server as a JPEG.
+  async function uploadImage(file) {
+    let src, sw, sh;
+    if (isPdf(file)) {
+      try { src = await pdfToCanvas(file); } catch (err) { throw new Error('This PDF could not be opened (' + err.message + ').'); }
+      sw = src.width; sh = src.height;
+    } else {
+      src = await loadImage(file);
+      sw = src.naturalWidth; sh = src.naturalHeight;
+    }
+    const k = Math.min(1, MAX_UPLOAD_PX / Math.max(sw, sh));
+    const w = Math.round(sw * k), h = Math.round(sh * k);
+    const cv = document.createElement('canvas');
+    cv.width = w; cv.height = h;
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(src, 0, 0, w, h);
+    const r = await api('POST', '/api/uploads', { dataUrl: cv.toDataURL('image/jpeg', 0.88) });
+    return { url: r.url, w, h };
   }
 
   async function viewEstimate(id) {
@@ -405,9 +484,9 @@
                 <p class="muted small" style="margin-top:0">Enter each straight run of fence. Type feet as 42.5 or 42' 6". Runs that meet at a corner share a post.</p>
                 ${S.features.sketch_reader ? `
                 <div class="notice info" style="display:flex;gap:.6rem;align-items:center;flex-wrap:wrap">
-                  <span style="flex:1;min-width:200px">Have a sketch with the measurements written on it? Take a photo and the lengths and gates are filled in for you.</span>
+                  <span style="flex:1;min-width:200px">Have a sketch with the measurements written on it? Use a photo, screenshot or PDF and the lengths and gates are filled in for you.</span>
                   <button type="button" class="btn-sm btn-primary" id="read-sketch">Read a sketch</button>
-                  <input type="file" id="sketch-file" accept="image/*" hidden>
+                  <input type="file" id="sketch-file" accept="image/*,application/pdf,.pdf" hidden>
                 </div>` : ''}
                 <div id="sketch-result"></div>
                 <div id="runs"></div>

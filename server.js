@@ -10,6 +10,11 @@ const PORT = parseInt(process.env.PORT || '3000', 10);
 const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(__dirname, 'data'));
 const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 const PUBLIC_DIR = path.join(__dirname, 'public');
+// Browser libraries served straight from node_modules (no build step).
+const VENDOR = {
+  'pdf.min.mjs': path.join(__dirname, 'node_modules/pdfjs-dist/legacy/build/pdf.min.mjs'),
+  'pdf.worker.min.mjs': path.join(__dirname, 'node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs'),
+};
 const APP_PASSWORD = process.env.APP_PASSWORD || '';
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.createHash('sha256').update('fence:' + APP_PASSWORD).digest('hex');
 const SESSION_DAYS = 30;
@@ -21,7 +26,7 @@ const db = open(DATA_DIR);
 // ---------- helpers ----------
 
 const MIME = {
-  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
+  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml',
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.ico': 'image/x-icon',
 };
@@ -477,6 +482,11 @@ async function handle(req, res) {
     if (!isAuthed(req)) return send(res, 401, 'Login required');
     const name = path.basename(pathname);
     return serveFile(res, path.join(UPLOAD_DIR, name), 'private, max-age=31536000, immutable');
+  }
+
+  if (pathname.startsWith('/vendor/pdfjs/')) {
+    const file = VENDOR[pathname.slice('/vendor/pdfjs/'.length)];
+    return file ? serveFile(res, file, 'public, max-age=604800') : send(res, 404, 'Not found');
   }
 
   // Static files; anything unknown falls back to the single page app.

@@ -99,7 +99,7 @@
       this.el.innerHTML = `
         <div class="layout-tool">
           <div class="layout-toolbar">
-            <button type="button" data-act="upload">Upload drawing / photo</button>
+            <button type="button" data-act="upload">Upload drawing / photo / PDF</button>
             <button type="button" data-mode="draw">Draw fence</button>
             <button type="button" data-mode="gate">Add gate</button>
             <button type="button" data-mode="scale">Set scale</button>
@@ -110,7 +110,7 @@
             <button type="button" data-act="fit">Fit</button>
             <button type="button" data-act="clear">Clear</button>
             <button type="button" data-act="noimage">Remove image</button>
-            <input type="file" accept="image/*" hidden>
+            <input type="file" accept="image/*,application/pdf,.pdf" hidden>
           </div>
           <div class="layout-canvas-wrap"><canvas></canvas></div>
           <div class="layout-hint"></div>
