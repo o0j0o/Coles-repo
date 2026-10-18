@@ -7,6 +7,7 @@ A web app for estimating fence jobs. You enter measurements or trace the fence o
 **Estimates**
 - Enter fence runs by typing lengths (`42.5`, `42' 6"`, or `42 6`), and mark which runs meet at a corner or close a shape.
 - Or switch to **Drawing**: upload a photo, sketch, survey or screenshot, tap two points a known distance apart to set the scale, then tap along the fence line. Each straight line becomes a run with its measured length, and you can type over any length. Gates can be tapped onto the drawing. A blank grid works too if you have no picture.
+- **Read a sketch (optional, AI)**: take a photo of a hand-drawn sketch with the measurements written on it, and Claude reads the runs, corners and gates into the estimate for you. It lists anything it had to estimate or couldn't read, so you can check it against the drawing. This only appears when `ANTHROPIC_API_KEY` is set on the server (see below).
 - Gates: single or double, any width, and you choose the gate product.
 - The app counts sections and line, corner, end and gate posts. It then builds the material list from the fence type's recipe, adding waste allowance and rounding up to full packs (boxes of screws, rolls of fabric, and so on).
 - On each job you can swap any material for another one in the same category, override a quantity, remove a line, or add extra items and charges.
@@ -34,9 +35,10 @@ The app starts with sample suppliers, materials and four fence types (wood priva
 
 ## Running it
 
-You need [Node.js](https://nodejs.org) 22.5 or newer. There are no other dependencies and nothing to install.
+You need [Node.js](https://nodejs.org) 22.5 or newer.
 
 ```bash
+npm install
 npm start
 ```
 
@@ -48,6 +50,8 @@ Then open http://localhost:3000. To use it from your iPhone on the same Wi-Fi, o
 | `DATA_DIR`           | `./data` | Where the SQLite database (`fence.db`) and uploaded drawings are stored |
 | `APP_PASSWORD`       | (none)   | If set, the app asks for this password. **Always set this when the app is reachable from the internet.** |
 | `SESSION_SECRET`     | derived  | Optional extra secret for signing login cookies |
+| `ANTHROPIC_API_KEY`  | (none)   | Turns on **Read a sketch**. Get a key at https://console.anthropic.com. Each sketch read is one Claude request (typically a few cents). |
+| `SKETCH_MODEL`       | `claude-opus-5-5` | Claude model used to read sketches |
 
 ```bash
 APP_PASSWORD='choose-a-strong-one' npm start
@@ -59,7 +63,7 @@ Run the tests with `npm test`.
 
 The app is a single Node process with a SQLite file. It runs on any host that supports Node and gives you a **persistent disk**, for example Render (with a Disk), Railway (with a Volume), Fly.io (with a Volume), or a small VPS. On the host:
 
-1. Point it at this repository. The start command is `npm start`.
+1. Point it at this repository. The build command is `npm install` and the start command is `npm start`.
 2. Mount a persistent disk and set `DATA_DIR` to its path (for example `/data`). Without one, your data is lost on every redeploy.
 3. Set `APP_PASSWORD`.
 4. Use HTTPS (most hosts provide it automatically).
@@ -76,6 +80,7 @@ For each run, the fence length minus any gate widths is divided by the post spac
 
 ```
 server.js            HTTP server, JSON API, login, uploads
+lib/sketch-reader.js Reads fence sketches with Claude (optional)
 lib/db.js            SQLite schema and settings
 lib/seed.js          Starter data (sample prices)
 public/index.html    App shell
@@ -83,5 +88,5 @@ public/js/calc.js    Estimating engine (shared by browser and tests)
 public/js/layout.js  Drawing/measuring tool
 public/js/app.js     Screens: estimates, quote, order list, materials, suppliers, fence types, settings
 public/css/app.css   Mobile-first styles, print styles for quotes
-test/                Calculation and API tests
+test/                Calculation, API and sketch-reader tests
 ```

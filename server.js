@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { open, tx } = require('./lib/db');
+const sketchReader = require('./lib/sketch-reader');
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(__dirname, 'data'));
@@ -301,7 +302,22 @@ function route(method, pattern, handler) {
 
 route('GET', '/api/auth', req => ({ required: !!APP_PASSWORD, authed: isAuthed(req) }));
 
+route('POST', '/api/read-sketch', async (req, body) => {
+  if (!sketchReader.enabled()) throw new HttpError(400, 'Sketch reading is not set up. Add ANTHROPIC_API_KEY on the server.');
+  const m = /^\/uploads\/([a-f0-9]+\.(jpg|png|webp))$/.exec(body.url || '');
+  if (!m) throw new HttpError(400, 'Upload the sketch first');
+  const file = path.join(UPLOAD_DIR, m[1]);
+  if (!fs.existsSync(file)) throw new HttpError(404, 'Sketch image not found');
+  const type = { jpg: 'image/jpeg', png: 'image/png', webp: 'image/webp' }[m[2]];
+  try {
+    return await sketchReader.readSketch(fs.readFileSync(file), type, getSettings().length_unit === 'm' ? 'm' : 'ft');
+  } catch (err) {
+    throw new HttpError(502, err.message);
+  }
+});
+
 route('GET', '/api/bootstrap', () => ({
+  features: { sketch_reader: sketchReader.enabled() },
   settings: getSettings(),
   suppliers: db.prepare('SELECT * FROM suppliers ORDER BY name').all(),
   materials: materialsWithPrices(),

@@ -3,7 +3,7 @@
   'use strict';
 
   const C = window.FenceCalc;
-  const S = { settings: {}, suppliers: [], materials: [], fenceTypes: [], matById: {}, supById: {}, ftById: {} };
+  const S = { features: {}, settings: {}, suppliers: [], materials: [], fenceTypes: [], matById: {}, supById: {}, ftById: {} };
   const view = document.getElementById('view');
   const STATUSES = ['draft', 'sent', 'accepted', 'declined', 'completed'];
   const UNITS = ['each', 'ft', 'length', 'bag', 'box', 'roll', 'set', 'panel', 'sheet', 'gal', 'pail', 'lb', 'kg', 'm', 'pair'];
@@ -58,6 +58,7 @@
   async function loadAll() {
     const d = await api('GET', '/api/bootstrap');
     S.settings = d.settings;
+    S.features = d.features || {};
     S.suppliers = d.suppliers;
     S.materials = d.materials;
     S.fenceTypes = d.fence_types;
@@ -402,6 +403,13 @@
                 <div id="runs"></div>`
               : `
                 <p class="muted small" style="margin-top:0">Enter each straight run of fence. Type feet as 42.5 or 42' 6". Runs that meet at a corner share a post.</p>
+                ${S.features.sketch_reader ? `
+                <div class="notice info" style="display:flex;gap:.6rem;align-items:center;flex-wrap:wrap">
+                  <span style="flex:1;min-width:200px">Have a sketch with the measurements written on it? Take a photo and the lengths and gates are filled in for you.</span>
+                  <button type="button" class="btn-sm btn-primary" id="read-sketch">Read a sketch</button>
+                  <input type="file" id="sketch-file" accept="image/*" hidden>
+                </div>` : ''}
+                <div id="sketch-result"></div>
                 <div id="runs"></div>
                 <div class="row" style="margin-top:10px">
                   <button type="button" class="btn-sm" id="add-run">+ Add run</button>
@@ -475,7 +483,51 @@
       renderRuns();
       renderGates();
       renderExtras();
+      renderSketchResult();
       recalc();
+      const sf = $('#sketch-file');
+      if (sf) sf.addEventListener('change', () => readSketch(sf));
+    }
+
+    // ----- AI sketch reading -----
+    function renderSketchResult() {
+      const el = $('#sketch-result');
+      if (!el || !e.sketch) return;
+      el.innerHTML = `<div class="notice">
+        <div class="row"><strong style="flex:1;min-width:220px">Read from sketch: please check these against the drawing</strong>
+          <a class="btn btn-sm" href="${esc(e.sketch.url)}" target="_blank" rel="noopener">View sketch</a>
+          <button type="button" class="btn-sm btn-ghost" id="dismiss-sketch">Dismiss</button></div>
+        ${e.sketch.notes ? `<p style="margin:.4rem 0 0;white-space:pre-line">${esc(e.sketch.notes)}</p>` : ''}
+      </div>`;
+    }
+
+    async function readSketch(input) {
+      const file = input.files[0];
+      input.value = '';
+      if (!file) return;
+      const btn = $('#read-sketch');
+      btn.disabled = true;
+      btn.textContent = 'Reading sketch...';
+      try {
+        const up = await uploadImage(file);
+        const r = await api('POST', '/api/read-sketch', { url: up.url });
+        if (!r.runs.length) { toast('No fence runs could be read from that image.', true); return; }
+        const total = r.runs.reduce((s, x) => s + x.length, 0);
+        const hasRuns = e.runs.some(x => num(x.length) > 0);
+        const msg = `Found ${r.runs.length} run${r.runs.length > 1 ? 's' : ''} (${qtyFmt(total)} ${unit()} total) and ${r.gates.length} gate${r.gates.length === 1 ? '' : 's'}.`
+          + (hasRuns || e.gates.length ? '\n\nThis replaces the runs and gates you have entered. Continue?' : '');
+        if ((hasRuns || e.gates.length) && !confirm(msg)) return;
+        e.runs = r.runs;
+        e.gates = r.gates.map((g, i) => ({ label: 'Gate ' + (i + 1), width: g.width, leaves: g.leaves, run: g.run, material_id: null }));
+        e.sketch = { url: up.url, notes: r.notes };
+        markDirty();
+        renderRuns(); renderGates(); renderSketchResult(); recalc();
+        toast(msg.split('\n')[0]);
+      } catch (err) {
+        toast('Could not read sketch: ' + err.message, true);
+      } finally {
+        if (btn.isConnected) { btn.disabled = false; btn.textContent = 'Read a sketch'; }
+      }
     }
 
     // ----- runs -----
@@ -736,6 +788,12 @@
         e.input_mode = b.dataset.inputMode;
         if (e.input_mode === 'drawing' && !e.layout) e.layout = window.FenceLayout.emptyLayout();
         markDirty(); renderAll();
+      } else if (b.id === 'read-sketch') {
+        $('#sketch-file').click();
+      } else if (b.id === 'dismiss-sketch') {
+        delete e.sketch;
+        markDirty();
+        $('#sketch-result').innerHTML = '';
       } else if (b.id === 'add-run') {
         e.runs.push({ length: '', joinPrev: true, closes: false });
         markDirty(); renderRuns(); renderGates(); recalc();
