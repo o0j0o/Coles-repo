@@ -258,6 +258,7 @@
     leaveGuard = null;
     view.innerHTML = `
       <form class="card login" id="login">
+        <img class="login-logo" src="/img/logo.jpg" alt="Black Belly Smokers">
         <h1>Sign in</h1>
         <p class="muted">Enter the app password.</p>
         <div class="grid">
@@ -810,8 +811,14 @@
       const scaleText = `×${qtyFmt(res.factor)} of the saved recipe`;
       $('#result').innerHTML = `
         <div class="print-only">
-          <h1>${esc(r.name)}</h1>
-          <p>${esc(S.settings.company_name || '')} · Batch sheet${lot.no ? ` · Lot <b>${esc(lot.no)}</b>` : ''} · ${esc(dateFmt(lot.date))} · ${esc(scaleText)}</p>
+          <div class="sheet-head">
+            <img src="/img/logo.jpg" alt="">
+            <div>
+              <h1>${esc(r.name)}</h1>
+              <p>${esc(S.settings.company_name || '')} · Batch sheet${lot.no ? ` · Lot <b>${esc(lot.no)}</b>` : ''}</p>
+              <p>${esc(dateFmt(lot.date))} · ${esc(scaleText)}</p>
+            </div>
+          </div>
         </div>
         <div class="stats" style="margin-bottom:14px">
           ${statBox('Makes', amount(res.output.qty, res.output.unit), altAmount(res.output.qty, res.output.unit))}
