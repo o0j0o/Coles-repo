@@ -3,7 +3,7 @@
   'use strict';
 
   const C = window.RecipeCalc;
-  const S = { settings: {}, ingredients: [], energy: [], equipment: [], recipes: [], ingById: {}, enById: {}, eqById: {}, recById: {} };
+  const S = { features: {}, settings: {}, ingredients: [], energy: [], equipment: [], recipes: [], ingById: {}, enById: {}, eqById: {}, recById: {} };
   const view = document.getElementById('view');
 
   // ---------- utilities ----------
@@ -73,6 +73,7 @@
   async function loadAll() {
     const d = await api('GET', '/api/bootstrap');
     S.settings = d.settings;
+    S.features = d.features || {};
     S.ingredients = d.ingredients;
     S.energy = d.energy_sources;
     S.equipment = d.equipment;
@@ -238,6 +239,7 @@
     const id = b === 'new' ? null : Number(b);
     try {
       if (!a) return viewRecipes();
+      if (a === 'import') return viewImport();
       if (a === 'recipe' && b && c === 'make') return viewMake(Number(b));
       if (a === 'recipe' && b) return viewRecipe(id);
       if (a === 'ingredients') return b ? viewIngredient(id) : viewIngredients();
@@ -321,6 +323,7 @@
     view.innerHTML = `
       <div class="page-head">
         <h1>Recipes</h1>
+        <a class="btn" href="#/import">Import from photo</a>
         <a class="btn btn-primary" href="#/recipe/new">+ New recipe</a>
       </div>
       <div class="card">
@@ -369,9 +372,12 @@
       name: '', product: C.PRODUCTS[0], code: '', description: '',
       yield_qty: '', yield_unit: metric() ? 'kg' : 'lb', density: '',
       pack_name: '', pack_qty: '', pack_unit: '', sell_price: '',
-      lines: [], steps: [], method: '', notes: '', active: 1,
+      lines: [], steps: [], method: '', notes: '', active: 1, source_files: [],
     };
   }
+
+  // A recipe built by the importer, waiting to be reviewed and saved in the editor.
+  let recipeDraft = null;
 
   function copyRecipe(r) {
     const out = JSON.parse(JSON.stringify(r));
@@ -417,10 +423,12 @@
   }
 
   function viewRecipe(id) {
-    const src = id ? S.recById[id] : newRecipe();
+    const fromImport = !id && recipeDraft;
+    const src = id ? S.recById[id] : (recipeDraft || newRecipe());
+    recipeDraft = null;
     if (!src) { view.innerHTML = '<div class="empty">Recipe not found. <a href="#/">Back</a></div>'; return; }
     const r = copyRecipe(src);
-    let dirty = false;
+    let dirty = !!fromImport;
     leaveGuard = silent => !dirty || (!silent && confirm('You have unsaved changes. Leave without saving?'));
 
     function markDirty() {
@@ -435,6 +443,7 @@
           <a class="btn btn-ghost btn-sm" href="${id ? `#/recipe/${id}/make` : '#/'}">&larr; ${id ? 'Back' : 'Recipes'}</a>
           <h1>${id ? esc(r.name) : 'New recipe'}</h1>
         </div>
+        ${fromImport ? '<div class="notice info">Imported. Check the amounts against the original, add the yield, prices and labour, then tap <b>Save</b>.</div>' : ''}
         <div class="split">
           <div>
             <section class="card" id="basics">
@@ -482,6 +491,7 @@
                 ${field('Active', 'active', r.active, { type: 'checkbox' })}
               </div>
             </section>
+            ${sourceFilesCard(r.source_files)}
             ${id ? `<div class="row"><button type="button" class="btn-danger" data-act="delete">Delete recipe</button><button type="button" data-act="duplicate">Duplicate</button></div>` : ''}
           </div>
           <div class="sticky">
@@ -730,6 +740,256 @@
     view.oninput = onInput;
     view.onchange = onChange;
     view.onclick = onClick;
+  }
+
+  // Thumbnails of the original pages a recipe was imported from.
+  function sourceFilesCard(files) {
+    if (!files || !files.length) return '';
+    return `
+      <section class="card">
+        <h2>Original pages</h2>
+        <div class="sources">${files.map(f => /\.pdf$/.test(f.url)
+          ? `<a class="source pdf" href="${esc(f.url)}" target="_blank" rel="noopener">PDF<span>${esc(f.name)}</span></a>`
+          : `<a class="source" href="${esc(f.url)}" target="_blank" rel="noopener"><img src="${esc(f.url)}" alt="${esc(f.name)}" loading="lazy"></a>`).join('')}</div>
+      </section>`;
+  }
+
+  // =====================================================================
+  // Import a recipe from photos, PDFs or text
+  // =====================================================================
+  const MAX_IMAGE_PX = 2000;
+  const MAX_PDF_BYTES = 20 * 1024 * 1024;
+
+  function isPdf(file) {
+    return file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '');
+  }
+
+  function readAsDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(fr.result);
+      fr.onerror = () => reject(new Error('Could not read ' + file.name));
+      fr.readAsDataURL(file);
+    });
+  }
+
+  // Shrink photos before upload: phone pictures are far bigger than needed to read a recipe.
+  function prepareImage(file) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, MAX_IMAGE_PX / Math.max(img.naturalWidth, img.naturalHeight));
+        const cv = document.createElement('canvas');
+        cv.width = Math.round(img.naturalWidth * scale);
+        cv.height = Math.round(img.naturalHeight * scale);
+        const ctx = cv.getContext('2d');
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, cv.width, cv.height);
+        ctx.drawImage(img, 0, 0, cv.width, cv.height);
+        URL.revokeObjectURL(url);
+        resolve(cv.toDataURL('image/jpeg', 0.85));
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error(`${file.name} isn't a picture this browser can open. Try a JPEG or PNG.`)); };
+      img.src = url;
+    });
+  }
+
+  // Guess how a new ingredient is bought from how the recipe measures it.
+  // Liquids are bought by volume; dry goods by weight even when measured in spoons.
+  const LIQUID_CATEGORIES = ['vinegar', 'liquid', 'spirit', 'oil'];
+  function purchaseUnitFor(unit, category) {
+    const d = C.dim(unit);
+    if (d === 'count') return 'each';
+    if (d === 'volume' && LIQUID_CATEGORIES.includes(category)) return metric() ? 'L' : 'gal';
+    return metric() ? 'kg' : 'lb';
+  }
+
+  function viewImport() {
+    const pages = []; // { name, dataUrl, pdf }
+    let text = '';
+    let result = null; // { recipe, sources }
+    let picks = [];    // per ingredient: existing id, '__new' or '' to skip
+    leaveGuard = silent => !result || (!silent && confirm('Leave without creating the recipe?'));
+
+    view.innerHTML = `
+      <div class="page-head">
+        <a class="btn btn-ghost btn-sm" href="#/">&larr; Recipes</a>
+        <h1>Import a recipe</h1>
+      </div>
+      ${S.features.recipe_reader ? '' : `<div class="notice">Reading recipes from photos isn't switched on for this server. It needs an Anthropic API key: add <code>ANTHROPIC_API_KEY</code> to the <code>.env</code> file next to <code>docker-compose.yml</code> and restart (see README). You can still type recipes in with <a href="#/recipe/new">New recipe</a>.</div>`}
+      <section class="card" id="pick">
+        <h2>Pages</h2>
+        <p class="muted small" style="margin-top:0">Take a photo of each page, or choose photos, screenshots or PDFs. Several pages of the same recipe are read together. Handwriting is fine if it's legible.</p>
+        <div class="row">
+          <button type="button" class="btn-primary" id="camera">Take photo</button>
+          <button type="button" id="choose">Choose files</button>
+          <input type="file" id="camera-file" accept="image/*" capture="environment" hidden>
+          <input type="file" id="files" accept="image/*,application/pdf,.pdf" multiple hidden>
+        </div>
+        <div class="sources" id="pages" style="margin-top:12px"></div>
+        <label class="field" style="margin-top:12px">Or paste the recipe text
+          <textarea id="text" rows="5" placeholder="Paste a recipe from an email, document or website"></textarea>
+        </label>
+        <div class="row end" style="margin-top:12px">
+          <button type="button" class="btn-primary" id="read"${S.features.recipe_reader ? '' : ' disabled'}>Read recipe</button>
+        </div>
+      </section>
+      <div id="review"></div>`;
+
+    function drawPages() {
+      $('#pages').innerHTML = pages.map((p, i) => `
+        <div class="source">
+          ${p.pdf ? `<div class="pdf">PDF<span>${esc(p.name)}</span></div>` : `<img src="${p.dataUrl}" alt="${esc(p.name)}">`}
+          <button type="button" class="btn-icon btn-sm remove" data-remove="${i}" aria-label="Remove ${esc(p.name)}">✕</button>
+        </div>`).join('');
+    }
+
+    async function addFiles(list) {
+      for (const file of Array.from(list)) {
+        try {
+          if (isPdf(file)) {
+            if (file.size > MAX_PDF_BYTES) throw new Error(`${file.name} is over 20 MB`);
+            pages.push({ name: file.name, dataUrl: await readAsDataUrl(file), pdf: true });
+          } else {
+            pages.push({ name: file.name || 'Photo', dataUrl: await prepareImage(file), pdf: false });
+          }
+        } catch (err) { toast(err.message, true); }
+      }
+      drawPages();
+    }
+
+    async function read() {
+      text = $('#text').value.trim();
+      if (!pages.length && !text) { toast('Add a photo, PDF or some recipe text first', true); return; }
+      const btn = $('#read');
+      btn.disabled = true;
+      btn.textContent = 'Reading... (up to a minute)';
+      try {
+        result = await api('POST', '/api/read-recipe', { files: pages.map(p => ({ name: p.name, dataUrl: p.dataUrl })), text });
+        picks = result.recipe.ingredients.map(i => (i.match_id ? String(i.match_id) : '__new'));
+        renderReview();
+        $('#review').scrollIntoView({ behavior: 'smooth' });
+      } catch (err) {
+        toast('Could not read the recipe: ' + err.message, true);
+      } finally {
+        if (btn.isConnected) { btn.disabled = false; btn.textContent = 'Read again'; }
+      }
+    }
+
+    function renderReview() {
+      const rc = result.recipe;
+      const newCount = picks.filter(p => p === '__new').length;
+      $('#review').innerHTML = `
+        ${rc.notes ? `<div class="notice"><b>Check these against the original:</b><div style="white-space:pre-line;margin-top:.3rem">${esc(rc.notes)}</div></div>` : ''}
+        <section class="card">
+          <h2>Recipe</h2>
+          <div class="grid cols-3">
+            <label class="field span-all">Name<input id="r-name" value="${esc(rc.name)}"></label>
+            <label class="field">Product<select id="r-product">${C.PRODUCTS.map(p => opt(p, p, rc.product)).join('')}</select></label>
+            <label class="field">One batch makes<input id="r-yield" value="${rc.yield_qty || ''}" inputmode="decimal" placeholder="Not in the recipe"></label>
+            <label class="field">Unit<select id="r-yield-unit">${unitOptionsFor(rc.yield_unit)}</select></label>
+          </div>
+        </section>
+        <section class="card">
+          <h2>Ingredients</h2>
+          <p class="muted small" style="margin-top:0">Each ingredient is matched to one you already have where possible. Unmatched ones are added as new ingredients <b>without a price</b>; add the price on the Ingredients page so the recipe costs correctly.</p>
+          <div class="table-wrap"><table class="data cards">
+            <thead><tr><th>In the recipe</th><th class="num">Amount</th><th>Use</th></tr></thead>
+            <tbody>${rc.ingredients.map((ing, i) => `
+              <tr>
+                <td class="primary-cell">${esc(ing.name)}${ing.note ? `<div class="small muted">${esc(ing.note)}</div>` : ''}${ing.per_pack ? ' <span class="badge">per pack</span>' : ''}</td>
+                <td class="num" data-label="Amount">${ing.qty ? `${qtyFmt(ing.qty)} ${esc(ing.unit)}` : '<span class="muted">none given</span>'}</td>
+                <td data-label="Use">
+                  <select data-pick="${i}">
+                    ${opt('__new', '+ Add as new', picks[i])}
+                    ${opt('', 'Leave out', picks[i])}
+                    <optgroup label="Your ingredients">${S.ingredients.map(x => opt(x.id, x.name, picks[i])).join('')}</optgroup>
+                  </select>
+                </td>
+              </tr>`).join('')}</tbody>
+          </table></div>
+          ${newCount ? `<p class="small muted">${newCount} new ${newCount === 1 ? 'ingredient' : 'ingredients'} will be added.</p>` : ''}
+        </section>
+        ${rc.steps.length ? `
+        <section class="card">
+          <h2>Process</h2>
+          <div class="list">${rc.steps.map(st => `
+            <div class="list-item"><div class="main">
+              <div class="title">${esc(st.label)}</div>
+              <div class="sub">${esc([st.equipment_id && S.eqById[st.equipment_id] ? S.eqById[st.equipment_id].name : 'no equipment matched',
+                st.days ? `${qtyFmt(st.days)} ${st.days === 1 ? 'day' : 'days'}` : '', st.hours ? `${qtyFmt(st.hours)} h` : ''].filter(Boolean).join(' · '))}</div>
+            </div></div>`).join('')}</div>
+          <p class="small muted">You can change equipment, times and labour in the recipe editor next.</p>
+        </section>` : ''}
+        ${rc.method ? `<section class="card"><h2>Method</h2><div style="white-space:pre-wrap">${esc(rc.method)}</div></section>` : ''}
+        <div class="row end"><button type="button" class="btn-primary" id="create">Create recipe</button></div>`;
+    }
+
+    async function create() {
+      const rc = result.recipe;
+      const btn = $('#create');
+      btn.disabled = true;
+      try {
+        // Add the new ingredients first so the recipe can point at them.
+        const ids = [];
+        for (let i = 0; i < rc.ingredients.length; i++) {
+          const ing = rc.ingredients[i];
+          if (picks[i] === '__new') {
+            const made = await api('POST', '/api/ingredients', {
+              name: ing.name, category: ing.category, purchase_qty: 1, purchase_unit: purchaseUnitFor(ing.unit, ing.category), purchase_price: 0,
+              notes: `Added by recipe import from "${$('#r-name').value.trim() || rc.name}". Enter the price.`,
+            });
+            ids.push(made.id);
+          } else ids.push(picks[i] ? Number(picks[i]) : null);
+        }
+        await loadAll();
+        const yieldQty = num($('#r-yield').value, 0);
+        recipeDraft = Object.assign(newRecipe(), {
+          name: $('#r-name').value.trim() || rc.name,
+          product: $('#r-product').value,
+          description: rc.description,
+          yield_qty: yieldQty > 0 ? yieldQty : '',
+          yield_unit: $('#r-yield-unit').value,
+          pack_name: rc.pack_name, pack_qty: rc.pack_qty || '', pack_unit: rc.pack_unit,
+          method: rc.method,
+          notes: `Imported ${dateFmt(today())}.` + (rc.notes ? '\nChecks from import: ' + rc.notes : ''),
+          source_files: result.sources,
+          lines: rc.ingredients.map((ing, i) => ids[i] ? {
+            ingredient_id: ids[i], qty: ing.qty || '', unit: ing.unit, basis: ing.per_pack ? 'per_pack' : 'batch', note: ing.note,
+          } : null).filter(Boolean),
+          steps: rc.steps.map(st => {
+            const eq = S.eqById[st.equipment_id];
+            const storage = st.days > 0 || (eq && num(eq.always_on));
+            return {
+              label: st.label, equipment_id: eq ? eq.id : null, hours: storage ? '' : (st.hours || ''),
+              scaling: storage ? 'storage' : 'fixed', days: storage ? (st.days || 1) : '',
+              energy: eq ? (eq.energy_use || []).map(e => Object.assign({}, e)) : [], labor_hours: '',
+            };
+          }),
+        });
+        result = null;
+        go('#/recipe/new');
+      } catch (err) {
+        toast(err.message, true);
+        btn.disabled = false;
+      }
+    }
+
+    view.onclick = ev => {
+      const t = ev.target;
+      const rm = t.closest('[data-remove]');
+      if (rm) { pages.splice(+rm.dataset.remove, 1); drawPages(); return; }
+      if (t.id === 'camera') $('#camera-file').click();
+      else if (t.id === 'choose') $('#files').click();
+      else if (t.id === 'read') read();
+      else if (t.id === 'create') create();
+    };
+    view.onchange = ev => {
+      const t = ev.target;
+      if (t.id === 'camera-file' || t.id === 'files') { addFiles(t.files).then(() => { t.value = ''; }); return; }
+      if (t.dataset.pick !== undefined) { picks[+t.dataset.pick] = t.value; renderReview(); }
+    };
   }
 
   // =====================================================================
@@ -1350,12 +1610,18 @@
       </form>
       <section class="card" style="margin-top:14px">
         <h2>Backup</h2>
-        <p class="muted small" style="margin-top:0">Download everything (recipes, ingredients, equipment, energy and settings) as one file. Restoring replaces all current data.</p>
+        <p class="muted small" style="margin-top:0">Download everything (recipes, ingredients, equipment, energy and settings) as one file. Restoring replaces all current data. Photos of imported recipe pages aren't in this file; they're kept in the app's data folder (see README).</p>
         <div class="row">
           <button type="button" id="backup">Download backup</button>
           <button type="button" id="restore">Restore from backup</button>
           <input type="file" id="restore-file" accept=".json,application/json" hidden>
         </div>
+      </section>
+      <section class="card">
+        <h2>Import from photo</h2>
+        <p class="muted small" style="margin:0">${S.features.recipe_reader
+          ? 'On. Recipes can be read from photos, PDFs and pasted text. Each read is one request to Anthropic, typically a few cents.'
+          : 'Off. To read recipes from photos, PDFs and text, add <code>ANTHROPIC_API_KEY</code> to the server (see README).'}</p>
       </section>
       ${auth.required ? '<section class="card"><h2>Account</h2><button type="button" id="logout">Sign out</button></section>' : `
       <section class="card"><h2>Security</h2><p class="muted small" style="margin:0">No password is set. Before putting this app on the internet, set the <code>APP_PASSWORD</code> environment variable on the server (see README).</p></section>`}`;

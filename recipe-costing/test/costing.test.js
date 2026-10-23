@@ -186,3 +186,10 @@ test('per day energy on a normal step uses hours / 24', () => {
     energyById: ens });
   near(r.steps[0].energy[0].qty, 1);
 });
+
+test('ingredients without a price are flagged', () => {
+  const r = C.computeRecipe({ recipe: { yield_qty: 1, yield_unit: 'kg', lines: [{ ingredient_id: 5, qty: 1, unit: 'kg' }] },
+    ingredientsById: { 5: { id: 5, name: 'Allspice', purchase_qty: 1, purchase_unit: 'kg', purchase_price: 0 } } });
+  assert.equal(r.lines[0].warning, 'No price entered yet');
+  assert.deepEqual(r.warnings, ['Allspice: No price entered yet']);
+});

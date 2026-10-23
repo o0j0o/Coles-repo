@@ -13,6 +13,15 @@ A recipe book that scales your batches and works out what each batch really cost
   - **Per load**: you say how much finished product one smoker or dehydrator load makes, and a bigger batch takes whole extra loads (6 kg of jerky at 2.5 kg a load = 3 loads).
 - Live batch cost while you edit, with cost per pack, per kg, per lb or per L, your margin at your selling price, and the price you'd need for your target margin.
 
+**Import from photo** (Recipes, then Import from photo)
+- Take a photo of each page, or choose photos, screenshots or PDFs. Several pages of one recipe are read together, and you can paste recipe text instead. Handwriting works if it's legible.
+- Claude (Anthropic's AI) reads the name, yield, pack size, ingredients with amounts and notes, the process steps (smoking hours, fridge days) and the full method.
+- Each ingredient is matched to one you already have where possible ("scotch bonnets" matches "Scotch bonnet peppers"). On the review screen you can change any match, add it as a new ingredient, or leave it out. New ingredients are added **without a price** and are flagged until you enter one.
+- Steps are matched to your equipment, and fridge or freezer time becomes a days-in-storage step.
+- The recipe then opens in the editor for you to check against the original and save. The original pages stay with the recipe under **Original pages**.
+- Anything the AI converted, estimated or couldn't read is listed for you to check, especially cure amounts and temperatures. **Always check an imported recipe against the original before you make it.**
+- This needs an Anthropic API key on the server (see below). Each read is one request, typically a few cents.
+
 **Make a batch** (tap a recipe)
 - Scale by the amount you want (e.g. 20 L or 6 kg), by number of packs, by a multiplier, or by **what I have** (e.g. "I have 12 lb of brisket, how much can I make?").
 - Scaled ingredient list in friendly units with the metric/imperial equivalent, and each ingredient's percent of the mix (handy for checking cure levels).
@@ -58,6 +67,8 @@ Then open http://localhost:3000. To use it from your iPhone on the same Wi-Fi, o
 | `DATA_DIR`           | `./data` | Where the SQLite database (`recipes.db`) is stored |
 | `APP_PASSWORD`       | (none)   | If set, the app asks for this password. **Always set this when the app is reachable from the internet.** |
 | `SESSION_SECRET`     | derived  | Optional extra secret for signing login cookies |
+| `ANTHROPIC_API_KEY`  | (none)   | Turns on **Import from photo**. Get a key at https://console.anthropic.com |
+| `RECIPE_MODEL`       | `claude-opus-5-5` | Claude model used to read recipes |
 
 Run the tests with `npm test`.
 
@@ -68,7 +79,7 @@ On the lab machine, with Docker and the Compose plugin installed:
 ```bash
 git clone <this repository>
 cd Coles-repo/recipe-costing
-cp .env.example .env        # then edit .env and set APP_PASSWORD
+cp .env.example .env        # then edit .env: set APP_PASSWORD, and ANTHROPIC_API_KEY for photo import
 docker compose up -d --build
 ```
 
@@ -78,10 +89,10 @@ The app is then on port 3000 of that machine. The database is kept in the Docker
 
 **Logs**: `docker compose logs -f`
 
-**Backups**: use Settings, then Download backup, regularly. To copy the raw database file as well:
+**Backups**: use Settings, then Download backup, regularly. That file has all your data except the photos of imported recipe pages. To copy the whole data folder (database and photos):
 
 ```bash
-docker compose cp recipes:/data/recipes.db ./recipes-$(date +%F).db
+docker compose cp recipes:/data ./recipes-backup-$(date +%F)
 ```
 
 ## Reaching it from anywhere with Tailscale
@@ -101,7 +112,7 @@ The app is a single Node process with a SQLite file. It also runs on any host th
 
 **On iPhone**: open the site in Safari, tap Share, then **Add to Home Screen**.
 
-**Backups**: use Settings, then Download backup, regularly.
+**Backups**: use Settings, then Download backup, regularly, and copy `DATA_DIR` (it holds the photos of imported recipe pages).
 
 ## Project layout
 
@@ -111,9 +122,10 @@ docker-compose.yml    Lab deployment; copy .env.example to .env first
 server.js             HTTP server, JSON API, login
 lib/db.js             SQLite schema, upgrades and settings
 lib/seed.js           Starter data (placeholder prices)
+lib/recipe-reader.js  Reads recipes from photos, PDFs and text with Claude (optional)
 public/index.html     App shell
 public/js/costing.js  Units, scaling and cost engine (shared by browser and tests)
 public/js/app.js      Screens: recipes, make a batch, ingredients, equipment, energy, settings
 public/css/app.css    Mobile-first styles, print styles for batch sheets
-test/                 Costing and API tests
+test/                 Costing, API and recipe-reader tests
 ```

@@ -75,6 +75,7 @@ CREATE TABLE IF NOT EXISTS recipes (
   pack_unit TEXT,
   sell_price REAL,
   method TEXT,
+  source_files TEXT NOT NULL DEFAULT '[]',
   notes TEXT,
   active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -117,6 +118,7 @@ CREATE INDEX IF NOT EXISTS idx_steps_recipe ON recipe_steps(recipe_id);
 const ADDED_COLUMNS = {
   equipment: ['purchase_date TEXT', 'always_on INTEGER NOT NULL DEFAULT 0', 'capacity_qty REAL', 'capacity_unit TEXT'],
   recipe_steps: ['days REAL', 'store_qty REAL', 'store_unit TEXT'],
+  recipes: ["source_files TEXT NOT NULL DEFAULT '[]'"],
 };
 
 function migrate(db) {

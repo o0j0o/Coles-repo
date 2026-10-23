@@ -243,7 +243,10 @@
       else {
         const c = ingredientCost(ing, qty, l.unit);
         if (Number.isFinite(c)) out.cost = c;
-        else out.warning = `Can't price ${l.unit} against ${ing.purchase_unit || 'no price'}${dim(l.unit) !== dim(ing.purchase_unit) ? ' (add density)' : ''}`;
+        else if (dim(l.unit) === 'count' || dim(ing.purchase_unit) === 'count') {
+          out.warning = `Measured in ${l.unit} but bought by ${ing.purchase_unit}. Change one so they match`;
+        } else out.warning = `Can't price ${l.unit} against ${ing.purchase_unit || 'no price'}${dim(l.unit) !== dim(ing.purchase_unit) ? '. Add its density on the Ingredients page' : ''}`;
+        if (!out.warning && !(num(ing.purchase_price) > 0)) out.warning = 'No price entered yet';
         if (!perPack) out.grams = convert(qty, l.unit, 'g', ing.density);
       }
       if (out.warning) warnings.push(`${out.name}: ${out.warning}`);
@@ -269,7 +272,9 @@
         const storeUnit = num(st.store_qty) > 0 ? (st.store_unit || output.unit) : output.unit;
         const cap = eq ? convert(eq.capacity_qty, eq.capacity_unit, storeUnit, recipe.density) : NaN;
         if (Number.isFinite(cap) && cap > 0) share = Math.min(1, stored / cap);
-        else if (eq) warning = `Set how much ${eq.name} holds (on the Equipment page), or the whole unit is charged`;
+        else if (eq && num(eq.capacity_qty) > 0) {
+          warning = `Can't compare ${storeUnit} with ${eq.name}'s capacity in ${eq.capacity_unit}. Enter the amount stored in ${eq.capacity_unit}, or the whole unit is charged`;
+        } else if (eq) warning = `Set how much ${eq.name} holds (on the Equipment page), or the whole unit is charged`;
       }
       else if (st.scaling === 'loads') {
         const cap = convert(st.load_capacity, st.load_unit || output.unit, output.unit, recipe.density);

@@ -316,3 +316,11 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
 .sheet-head h1 { margin: 0 0 .25rem; }
 .sheet-head p { margin: 0; }
 @media print { .sheet-head img, .login-logo { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+
+/* ---------- imported pages ---------- */
+.sources { display: flex; flex-wrap: wrap; gap: 10px; }
+.sources .source { position: relative; display: block; width: 110px; height: 140px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface-2); text-decoration: none; }
+.sources .source img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.sources .pdf { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; width: 100%; height: 100%; font-weight: 800; color: var(--primary); padding: 8px; text-align: center; }
+.sources .pdf span { font-weight: 500; font-size: .72rem; color: var(--muted); word-break: break-word; }
+.sources .remove { position: absolute; top: 4px; right: 4px; min-height: 30px; min-width: 30px; padding: 0; border-radius: 50%; background: rgba(0,0,0,.6); color: #fff; border: 0; }

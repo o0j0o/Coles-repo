@@ -9,6 +9,7 @@ services:
     environment:
       APP_PASSWORD: ${APP_PASSWORD:?Set APP_PASSWORD in a .env file next to this one}
       SESSION_SECRET: ${SESSION_SECRET:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       TZ: ${TZ:-America/Barbados}
     volumes:
       - recipes-data:/data

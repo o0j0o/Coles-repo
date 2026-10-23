@@ -4,15 +4,19 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { open, tx } = require('./lib/db');
+const recipeReader = require('./lib/recipe-reader');
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(__dirname, 'data'));
+const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const APP_PASSWORD = process.env.APP_PASSWORD || '';
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.createHash('sha256').update('recipes:' + APP_PASSWORD).digest('hex');
 const SESSION_DAYS = 30;
-const MAX_BODY = 10 * 1024 * 1024;
+const MAX_BODY = 40 * 1024 * 1024;
+const MAX_IMPORT_FILES = 10;
 
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 const db = open(DATA_DIR);
 
 // ---------- helpers ----------
@@ -20,7 +24,8 @@ const db = open(DATA_DIR);
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml',
-  '.png': 'image/png', '.jpg': 'image/jpeg', '.ico': 'image/x-icon',
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif', '.pdf': 'application/pdf',
+  '.ico': 'image/x-icon',
 };
 
 class HttpError extends Error {
@@ -177,8 +182,32 @@ function saveSimple(table, fields, body, id, extra) {
 
 function equipmentOut(row) { return parseEnergy(row, 'energy_use'); }
 
+// Original recipe pages (photos, scans, PDFs) kept with an imported recipe.
+const UPLOAD_URL = /^\/uploads\/[a-f0-9]{24}\.(jpg|png|webp|gif|pdf)$/;
+const UPLOAD_TYPES = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif', 'application/pdf': 'pdf' };
+
+function cleanSources(list) {
+  return JSON.stringify((Array.isArray(list) ? list : []).filter(f => f && UPLOAD_URL.test(f.url))
+    .map(f => ({ url: f.url, name: String(f.name || '').slice(0, 120) })));
+}
+
+function saveUploads(files) {
+  if (!Array.isArray(files) || !files.length) return [];
+  if (files.length > MAX_IMPORT_FILES) throw new HttpError(400, `Up to ${MAX_IMPORT_FILES} pages at a time`);
+  return files.map(f => {
+    const m = /^data:([a-z]+\/[a-z+.-]+);base64,([A-Za-z0-9+/=]+)$/.exec((f && f.dataUrl) || '');
+    const ext = m && UPLOAD_TYPES[m[1]];
+    if (!ext) throw new HttpError(400, 'Use photos (JPEG, PNG, WebP) or PDF files');
+    const name = crypto.randomBytes(12).toString('hex') + '.' + ext;
+    const data = Buffer.from(m[2], 'base64');
+    fs.writeFileSync(path.join(UPLOAD_DIR, name), data);
+    return { url: '/uploads/' + name, name: String(f.name || '').slice(0, 120) || name, type: m[1], data };
+  });
+}
+
 function recipeFull(id) {
   const r = getOr404('recipes', id);
+  try { r.source_files = JSON.parse(r.source_files || '[]'); } catch { r.source_files = []; }
   r.lines = db.prepare('SELECT * FROM recipe_lines WHERE recipe_id = ? ORDER BY sort_order, id').all(id);
   r.steps = db.prepare('SELECT * FROM recipe_steps WHERE recipe_id = ? ORDER BY sort_order, id').all(id).map(s => parseEnergy(s, 'energy'));
   return r;
@@ -191,7 +220,8 @@ function allRecipes() {
 function saveRecipe(body, id) {
   requireName(body, 'Recipe');
   return tx(db, () => {
-    id = saveSimple('recipes', RECIPE_FIELDS, body, id);
+    id = saveSimple('recipes', RECIPE_FIELDS, body, id,
+      b => (b.source_files !== undefined ? { source_files: cleanSources(b.source_files) } : {}));
     if (Array.isArray(body.lines)) {
       db.prepare('DELETE FROM recipe_lines WHERE recipe_id = ?').run(id);
       body.lines.forEach((l, i) => {
@@ -285,7 +315,25 @@ function route(method, pattern, handler) {
 
 route('GET', '/api/auth', req => ({ required: !!APP_PASSWORD, authed: isAuthed(req) }));
 
+route('POST', '/api/read-recipe', async (req, body) => {
+  if (!recipeReader.enabled()) throw new HttpError(400, 'Recipe reading is not set up. Add ANTHROPIC_API_KEY on the server.');
+  const text = typeof body.text === 'string' ? body.text.trim().slice(0, 100000) : '';
+  const saved = saveUploads(body.files);
+  if (!saved.length && !text) throw new HttpError(400, 'Add a photo, PDF or some recipe text');
+  const catalog = {
+    ingredients: db.prepare('SELECT id, name, category FROM ingredients WHERE active = 1 ORDER BY name').all(),
+    equipment: db.prepare('SELECT id, name, kind, always_on FROM equipment WHERE active = 1 ORDER BY name').all(),
+  };
+  try {
+    const recipe = await recipeReader.readRecipe({ files: saved.map(f => ({ type: f.type, data: f.data })), text }, catalog);
+    return { recipe, sources: saved.map(f => ({ url: f.url, name: f.name })) };
+  } catch (err) {
+    throw new HttpError(502, err.message);
+  }
+});
+
 route('GET', '/api/bootstrap', () => ({
+  features: { recipe_reader: recipeReader.enabled() },
   settings: getSettings(),
   ingredients: db.prepare('SELECT * FROM ingredients ORDER BY name').all(),
   energy_sources: db.prepare('SELECT * FROM energy_sources ORDER BY name').all(),
@@ -341,13 +389,13 @@ route('POST', '/api/restore', (req, body) => { restore(body); return { ok: true 
 
 // ---------- server ----------
 
-function serveFile(res, file) {
+function serveFile(res, file, cache) {
   fs.stat(file, (err, st) => {
     if (err || !st.isFile()) return send(res, 404, 'Not found');
     res.writeHead(200, {
       'Content-Type': MIME[path.extname(file).toLowerCase()] || 'application/octet-stream',
       'Content-Length': st.size,
-      'Cache-Control': 'no-cache',
+      'Cache-Control': cache || 'no-cache',
     });
     fs.createReadStream(file).pipe(res);
   });
@@ -383,6 +431,11 @@ async function handle(req, res) {
       return send(res, 200, await r.handler(req, body, params));
     }
     return send(res, 404, { error: 'Not found' });
+  }
+
+  if (pathname.startsWith('/uploads/')) {
+    if (!isAuthed(req)) return send(res, 401, 'Login required');
+    return serveFile(res, path.join(UPLOAD_DIR, path.basename(pathname)), 'private, max-age=31536000, immutable');
   }
 
   // Static files; anything unknown falls back to the single page app.

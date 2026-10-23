@@ -12,5 +12,8 @@
     "dev": "node --no-warnings --watch server.js",
     "test": "node --no-warnings --test test/*.test.js"
   },
-  "license": "UNLICENSED"
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.135.0"
+  }
 }

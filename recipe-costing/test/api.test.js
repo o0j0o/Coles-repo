@@ -8,7 +8,9 @@ const path = require('node:path');
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'recipes-test-'));
 process.env.DATA_DIR = dir;
 process.env.APP_PASSWORD = 'secret';
+process.env.ANTHROPIC_API_KEY = 'test-key';
 const { server, db } = require('../server.js');
+const reader = require('../lib/recipe-reader.js');
 const C = require('../public/js/costing.js');
 
 let base;
@@ -124,6 +126,34 @@ test('fridge storage steps save and older databases are upgraded', async () => {
   assert.ok(cols('recipe_steps').includes('days') && cols('recipe_steps').includes('store_unit'));
   upgraded.close();
   fs.rmSync(old, { recursive: true, force: true });
+});
+
+test('reading a recipe saves the original pages and keeps them with the recipe', async () => {
+  let seen;
+  reader._setClient({ beta: { messages: { create: async req => {
+    seen = req;
+    return { stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify({
+      name: 'Read sauce', product: 'pepper sauce', description: '', yield_qty: 2, yield_unit: 'L', pack_name: '', pack_qty: 0, pack_unit: '',
+      ingredients: [{ name: 'Garlic', qty: 50, unit: 'g', note: '', category: 'produce', per_pack: false, match_id: 3 }],
+      steps: [], method: 'Blend.', notes: '' }) }] };
+  } } } });
+  const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+  const res = await call('POST', '/api/read-recipe', { files: [{ name: 'page1.png', dataUrl: png }] });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.recipe.name, 'Read sauce');
+  assert.match(seen.messages[0].content[1].text, /Garlic/);
+  const src = res.body.sources[0];
+  assert.match(src.url, /^\/uploads\/[a-f0-9]{24}\.png$/);
+  assert.equal((await fetch(base + src.url, { headers: { cookie } })).status, 200);
+  assert.equal((await fetch(base + src.url)).status, 401, 'pages need a login');
+
+  const saved = (await call('POST', '/api/recipes', { name: 'Read sauce', source_files: [src, { url: '/etc/passwd', name: 'x' }] })).body;
+  assert.deepEqual(saved.source_files, [{ url: src.url, name: 'page1.png' }]);
+  await call('DELETE', '/api/recipes/' + saved.id);
+
+  assert.equal((await call('POST', '/api/read-recipe', {})).status, 400);
+  assert.equal((await call('POST', '/api/read-recipe', { files: [{ dataUrl: 'data:text/html;base64,PGgxPg==' }] })).status, 400);
+  assert.equal((await call('GET', '/api/bootstrap')).body.features.recipe_reader, true);
 });
 
 test('settings save', async () => {
