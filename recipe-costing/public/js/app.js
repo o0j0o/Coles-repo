@@ -154,6 +154,12 @@
     return opt('hour', unitName + ' per hour', per) + opt('run', unitName + ' per run', per) + opt('day', unitName + ' per day', per);
   }
 
+  // A recipe step starts with its equipment's fuel lines. Lines with burn rates by
+  // temperature are left blank so they follow the step's temperature.
+  function stepEnergyFrom(eq) {
+    return ((eq && eq.energy_use) || []).map(u => ({ energy_id: u.energy_id, per: u.per, qty: u.rates && u.rates.length ? '' : u.qty }));
+  }
+
   function equipmentOptions(selected) {
     return opt('', '(no equipment / hand work)', selected || '') +
       S.equipment.filter(e => e.active || e.id === Number(selected)).map(e => opt(e.id, e.name, selected)).join('');
@@ -539,7 +545,7 @@
         return `
         <div class="fuel-row" data-step="${si}" data-fuel="${j}">
           <select data-k="energy_id" aria-label="Fuel or energy">${energyOptions(e.energy_id)}</select>
-          <input data-k="qty" value="${esc(e.qty)}" inputmode="decimal" aria-label="Amount used">
+          <input data-k="qty" id="fq-${si}-${j}" value="${esc(e.qty == null ? '' : e.qty)}" inputmode="decimal" aria-label="Amount used">
           <select data-k="per" aria-label="Per">${perOptions(u, e.per)}</select>
           <button type="button" class="btn-icon btn-ghost" data-act="del-fuel" data-step="${si}" data-fuel="${j}" aria-label="Remove">✕</button>
         </div>`;
@@ -561,7 +567,8 @@
             <label class="field">Equipment<select data-k="equipment_id">${equipmentOptions(s.equipment_id)}</select></label>
             ${s.scaling === 'storage' ? `
               <label class="field">Days stored<input data-k="days" value="${esc(s.days == null ? '' : s.days)}" inputmode="decimal"><span class="hint">e.g. 1 for overnight, 7 for a pastrami cure</span></label>` : `
-              <label class="field">${hoursLabel}<input data-k="hours" value="${esc(s.hours)}" inputmode="decimal"></label>`}
+              <label class="field">${hoursLabel}<input data-k="hours" value="${esc(s.hours)}" inputmode="decimal"></label>
+              <label class="field">Temperature<div class="input-group"><input data-k="temp" value="${esc(s.temp == null ? '' : s.temp)}" inputmode="numeric" placeholder="optional"><span>°F</span></div><span class="hint">Sets the fuel burn rate when the equipment has rates by temperature</span></label>`}
             <label class="field">When you scale the batch<select data-k="scaling">${Object.entries(C.STEP_SCALING).map(([k, v]) => opt(k, v, s.scaling || 'fixed')).join('')}</select></label>
             ${s.scaling === 'loads' ? `
               <label class="field">One load makes<input data-k="load_capacity" value="${esc(s.load_capacity == null ? '' : s.load_capacity)}" inputmode="decimal"><span class="hint">Finished product per smoker or dehydrator load</span></label>
@@ -598,7 +605,12 @@
         if (s.runs > 1 || s.scaling === 'loads') bits.push(`${s.runs} ${s.runs === 1 ? 'load' : 'loads'}`);
         if (s.scaling === 'storage') bits.push(`${qtyFmt(s.days)} ${s.days === 1 ? 'day' : 'days'} using ${pct(s.share * 100)} of the space`);
         else if (s.hours) bits.push(`${qtyFmt(s.hours)} h machine time`);
-        s.energy.forEach(e => bits.push(`${qtyFmt(e.qty)} ${e.unit} ${e.name} ${money(e.cost)}`));
+        s.energy.forEach((e, j) => {
+          const at = e.auto && e.per === 'hour' ? ` (${qtyFmt(e.rate)} ${e.unit}/h${s.temp ? ` at ${qtyFmt(s.temp)}°F` : ''})` : '';
+          bits.push(`${qtyFmt(e.qty)} ${e.unit} ${e.name}${at} ${money(e.cost)}`);
+          const input = $(`#fq-${s.index}-${j}`);
+          if (input) input.placeholder = e.auto ? `auto: ${qtyFmt(e.rate)}` : '0';
+        });
         if (s.equipmentCost) bits.push(`depreciation ${money(s.equipmentCost)}`);
         if (s.laborHours) bits.push(`labour ${money(s.laborCost)}`);
         el.textContent = (bits.join(' · ') || 'No cost yet') + (s.warning ? ` (${s.warning})` : '');
@@ -662,7 +674,7 @@
         s.equipment_id = el.value ? Number(el.value) : null;
         const eq = S.eqById[s.equipment_id];
         if (eq) {
-          s.energy = (eq.energy_use || []).map(e => Object.assign({}, e));
+          s.energy = stepEnergyFrom(eq);
           if (!s.label) s.label = eq.name;
           if (num(eq.always_on)) {
             s.scaling = 'storage';
@@ -964,7 +976,7 @@
             return {
               label: st.label, equipment_id: eq ? eq.id : null, hours: storage ? '' : (st.hours || ''),
               scaling: storage ? 'storage' : 'fixed', days: storage ? (st.days || 1) : '',
-              energy: eq ? (eq.energy_use || []).map(e => Object.assign({}, e)) : [], labor_hours: '',
+              energy: stepEnergyFrom(eq), labor_hours: '',
             };
           }),
         });
@@ -1118,7 +1130,7 @@
             <thead><tr><th>Step</th><th class="num">Loads</th><th class="num">Time</th><th>Fuel &amp; energy</th><th class="num">Labour</th><th class="num${costCls}">Cost</th></tr></thead>
             <tbody>${res.steps.map((s, i) => `
               <tr>
-                <td class="primary-cell">${i + 1}. ${esc(s.label)}${s.equipmentName && s.equipmentName !== s.label ? `<div class="small muted">${esc(s.equipmentName)}</div>` : ''}</td>
+                <td class="primary-cell">${i + 1}. ${esc(s.label)}${(s.equipmentName && s.equipmentName !== s.label) || s.temp ? `<div class="small muted">${esc([s.equipmentName !== s.label ? s.equipmentName : '', s.temp ? `${qtyFmt(s.temp)}°F` : ''].filter(Boolean).join(' · '))}</div>` : ''}</td>
                 <td class="num" data-label="Loads">${s.scaling === 'loads' ? s.runs : ''}</td>
                 <td class="num" data-label="Time">${s.scaling === 'storage' ? `${qtyFmt(s.days)} ${s.days === 1 ? 'day' : 'days'}<div class="small muted">${pct(s.share * 100)} of space</div>` : s.hours ? qtyFmt(s.hours) + ' h' : ''}</td>
                 <td data-label="Fuel">${s.energy.map(e => `${qtyFmt(e.qty)} ${esc(e.unit)} ${esc(e.name)}`).join('<br>')}</td>
@@ -1509,10 +1521,21 @@
         return `
         <div class="fuel-row" data-j="${j}">
           <select data-k="energy_id" aria-label="Fuel or energy">${energyOptions(u.energy_id)}</select>
-          <input data-k="qty" value="${esc(u.qty)}" inputmode="decimal" aria-label="Amount used">
+          <input data-k="qty" value="${esc(u.qty)}" inputmode="decimal" aria-label="Average amount used">
           <select data-k="per" aria-label="Per">${perOptions(unitName, u.per)}</select>
           <button type="button" class="btn-icon btn-ghost" data-del="${j}" aria-label="Remove">✕</button>
-        </div>`;
+        </div>
+        ${u.per === 'hour' || !u.per ? `
+        <div class="rates" data-j="${j}">
+          ${(u.rates || []).length ? `<div class="small muted">${esc(unitName)} per hour by cooking temperature:</div>` : ''}
+          ${(u.rates || []).map((r, k) => `
+            <div class="rate-row" data-j="${j}" data-r="${k}">
+              <div class="input-group"><input data-rk="temp" value="${esc(r.temp)}" inputmode="numeric" aria-label="Temperature"><span>°F</span></div>
+              <div class="input-group"><input data-rk="qty" value="${esc(r.qty)}" inputmode="decimal" aria-label="Burn rate"><span>${esc(unitName)}/h</span></div>
+              <button type="button" class="btn-icon btn-ghost" data-del-rate="${j}:${k}" aria-label="Remove">✕</button>
+            </div>`).join('')}
+          <button type="button" class="btn-sm btn-ghost" data-add-rate="${j}">+ Burn rate at a temperature</button>
+        </div>` : ''}`;
       }).join('');
     }
     const preview = () => {
@@ -1522,7 +1545,7 @@
       $('.hours-field').classList.toggle('hidden', on);
       $('#energy-hint').textContent = on
         ? 'Enter its average use per day. Check the energy label or a plug-in meter: e.g. a fridge rated 1,460 kWh a year uses 4 kWh a day.'
-        : 'These fill in automatically when you pick this equipment in a recipe step, and you can change them per recipe. A 1500 W element at full power uses 1.5 kWh per hour; thermostats cycle, so real use is often about half.';
+        : 'These fill in automatically when you pick this equipment in a recipe step, and you can change them per recipe. Smokers and grills burn more fuel the hotter they run: add burn rates at a few temperatures (weigh the fuel before and after a cook) and each recipe step uses the rate for its temperature. A 1500 W element at full power uses 1.5 kWh per hour; thermostats cycle, so real use is often about half.';
       const dep = C.depreciation(d);
       $('#dep').innerHTML = statBox('Depreciation / year', money(dep.perYear))
         + statBox('Book value today', dep.bookValue != null ? money(dep.bookValue) : '—', dep.ageYears != null ? `${qtyFmt(dep.ageYears)} years old` : 'Add the date bought')
@@ -1535,18 +1558,34 @@
       $('#preview').innerHTML = statBox(`Depreciation & upkeep / ${r.label}`, money(r.wear)) + statBox(`Energy / ${r.label}`, money(r.energy)) + statBox(`Total / ${r.label}`, money(r.total));
     };
     $('#uses').addEventListener('input', ev => {
+      const rate = ev.target.closest('[data-r]');
+      if (rate) { uses[+rate.dataset.j].rates[+rate.dataset.r][ev.target.dataset.rk] = ev.target.value; return; }
       const row = ev.target.closest('[data-j]');
-      if (row) { uses[+row.dataset.j][ev.target.dataset.k] = ev.target.value; preview(); }
+      if (row && ev.target.dataset.k) { uses[+row.dataset.j][ev.target.dataset.k] = ev.target.value; preview(); }
     });
     $('#uses').addEventListener('change', ev => {
       const row = ev.target.closest('[data-j]');
-      if (!row) return;
+      if (!row || !ev.target.dataset.k) return;
       const k = ev.target.dataset.k;
       uses[+row.dataset.j][k] = k === 'energy_id' ? Number(ev.target.value) || '' : ev.target.value;
       drawUses();
       preview();
     });
     $('#uses').addEventListener('click', ev => {
+      const add = ev.target.closest('[data-add-rate]');
+      const delRate = ev.target.closest('[data-del-rate]');
+      if (add || delRate) {
+        if (add) {
+          const u = uses[+add.dataset.addRate];
+          u.rates = (u.rates || []).concat({ temp: '', qty: '' });
+        } else {
+          const [j, k] = delRate.dataset.delRate.split(':').map(Number);
+          uses[j].rates.splice(k, 1);
+        }
+        dirty = true;
+        drawUses();
+        return;
+      }
       const b = ev.target.closest('[data-del]');
       if (!b) return;
       uses.splice(+b.dataset.del, 1);

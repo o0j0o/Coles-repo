@@ -130,11 +130,19 @@ function requireName(body, what) {
   if (!body.name || !String(body.name).trim()) throw new HttpError(400, what + ' name is required');
 }
 
-// Energy lists are stored as JSON: [{ energy_id, qty, per: 'hour' | 'run' | 'day' }]
-function cleanEnergy(list) {
-  return JSON.stringify((Array.isArray(list) ? list : []).filter(e => e && e.energy_id).map(e => ({
-    energy_id: Number(e.energy_id), qty: Number(e.qty) || 0, per: ['run', 'day'].includes(e.per) ? e.per : 'hour',
-  })));
+// Energy lists are stored as JSON: [{ energy_id, qty, per: 'hour' | 'run' | 'day', rates?: [{ temp, qty }] }].
+// On a recipe step a null qty means "use the equipment's burn rate at the step's temperature".
+function cleanEnergy(list, allowAuto) {
+  return JSON.stringify((Array.isArray(list) ? list : []).filter(e => e && e.energy_id).map(e => {
+    const out = { energy_id: Number(e.energy_id), qty: Number(e.qty) || 0, per: ['run', 'day'].includes(e.per) ? e.per : 'hour' };
+    if (allowAuto && (e.qty === '' || e.qty == null)) out.qty = null;
+    const rates = (Array.isArray(e.rates) ? e.rates : [])
+      .map(r => ({ temp: Number(r && r.temp), qty: Number(r && r.qty) }))
+      .filter(r => r.temp > 0 && r.qty >= 0)
+      .sort((a, b) => a.temp - b.temp);
+    if (rates.length) out.rates = rates;
+    return out;
+  }));
 }
 
 function parseEnergy(row, key) {
@@ -152,7 +160,7 @@ const EQUIPMENT_FIELDS = ['name', 'kind', 'purchase_cost', 'salvage_value', 'lif
 const RECIPE_FIELDS = ['name', 'product', 'code', 'description', 'yield_qty', 'yield_unit', 'density', 'pack_name',
   'pack_qty', 'pack_unit', 'sell_price', 'method', 'notes', 'active'];
 const LINE_FIELDS = ['ingredient_id', 'qty', 'unit', 'basis', 'note'];
-const STEP_FIELDS = ['label', 'equipment_id', 'hours', 'scaling', 'load_capacity', 'load_unit', 'days', 'store_qty', 'store_unit',
+const STEP_FIELDS = ['label', 'equipment_id', 'hours', 'temp', 'scaling', 'load_capacity', 'load_unit', 'days', 'store_qty', 'store_unit',
   'labor_hours', 'notes'];
 
 // Defaults for NOT NULL columns, so a blank field in the form doesn't fail the save.
@@ -239,7 +247,7 @@ function saveRecipe(body, id) {
         if (row.equipment_id && !db.prepare('SELECT 1 FROM equipment WHERE id = ?').get(row.equipment_id)) throw new HttpError(400, 'Unknown equipment in recipe');
         Object.assign(row, {
           recipe_id: id, sort_order: i, hours: Number(row.hours) || 0, labor_hours: Number(row.labor_hours) || 0,
-          scaling: ['fixed', 'linear', 'loads', 'storage'].includes(row.scaling) ? row.scaling : 'fixed', energy: cleanEnergy(s.energy),
+          scaling: ['fixed', 'linear', 'loads', 'storage'].includes(row.scaling) ? row.scaling : 'fixed', energy: cleanEnergy(s.energy, true),
         });
         insert('recipe_steps', row);
       });

@@ -163,6 +163,30 @@
     return out;
   }
 
+  /**
+   * How fast a piece of equipment uses one fuel, at a cooking temperature.
+   * A fuel line can carry burn rates measured at a few temperatures
+   * ([{ temp, qty }], °F); between them the rate is estimated on a straight
+   * line, and outside them the nearest one is used. Without them (or without
+   * a temperature) its single average rate applies. Returns null when the
+   * equipment doesn't list this fuel.
+   */
+  function burnRate(eq, energyId, temp) {
+    const use = eq && (eq.energy_use || []).find(u => Number(u.energy_id) === Number(energyId));
+    if (!use) return null;
+    const pts = (use.rates || []).filter(p => num(p.temp) > 0 && num(p.qty) >= 0)
+      .map(p => ({ temp: num(p.temp), qty: num(p.qty) })).sort((a, b) => a.temp - b.temp);
+    const t = num(temp);
+    if (!pts.length || !(t > 0)) return num(use.qty);
+    if (t <= pts[0].temp) return pts[0].qty;
+    const last = pts[pts.length - 1];
+    if (t >= last.temp) return last.qty;
+    const i = pts.findIndex(p => p.temp >= t);
+    const a = pts[i - 1];
+    const b = pts[i];
+    return a.qty + (b.qty - a.qty) * (t - a.temp) / (b.temp - a.temp);
+  }
+
   // ---------- scaling ----------
 
   function batchLines(recipe) {
@@ -285,13 +309,16 @@
       const hours = st.scaling === 'storage' ? days * 24 : num(st.hours) * mult;
       const energy = (st.energy || []).filter(e => e.energy_id).map(e => {
         const en = ens[e.energy_id];
-        const qty = num(e.qty) * (e.per === 'run' ? mult : e.per === 'day' ? hours / 24 : hours) * share;
+        // A blank amount means "use the equipment's burn rate at this step's temperature".
+        const auto = e.qty === '' || e.qty == null;
+        const rate = auto ? (burnRate(eq, e.energy_id, st.temp) || 0) : num(e.qty);
+        const qty = rate * (e.per === 'run' ? mult : e.per === 'day' ? hours / 24 : hours) * share;
         const cost = qty * energyUnitCost(en);
         const key = e.energy_id;
         if (!energyTotals[key]) energyTotals[key] = { energy_id: key, name: en ? en.name : '(missing)', unit: en ? en.unit : '', qty: 0, cost: 0 };
         energyTotals[key].qty += qty;
         energyTotals[key].cost += cost;
-        return { energy_id: e.energy_id, name: en ? en.name : '(missing energy source)', unit: en ? en.unit : '', qty, cost };
+        return { energy_id: e.energy_id, name: en ? en.name : '(missing energy source)', unit: en ? en.unit : '', qty, cost, rate, auto, per: e.per || 'hour' };
       });
       const energyCost = energy.reduce((s, e) => s + e.cost, 0);
       const equipmentCost = eq ? equipmentHourlyCost(eq) * hours * share : 0;
@@ -301,7 +328,8 @@
       if (warning) warnings.push(`${st.label || 'Step ' + (index + 1)}: ${warning}`);
       return {
         index, label: st.label || (eq ? eq.name : 'Step ' + (index + 1)), equipment_id: st.equipment_id || null,
-        equipmentName: eq ? eq.name : '', scaling: st.scaling || 'fixed', runs, hours, days, share, energy, energyCost,
+        equipmentName: eq ? eq.name : '', scaling: st.scaling || 'fixed', temp: num(st.temp) > 0 ? num(st.temp) : null,
+        runs, hours, days, share, energy, energyCost,
         equipmentCost, laborHours, laborCost, warning,
       };
     });
@@ -348,7 +376,7 @@
 
   const api = {
     UNITS, UNIT_GROUPS, INGREDIENT_CATEGORIES, PRODUCTS, ENERGY_KINDS, ENERGY_UNITS, EQUIPMENT_KINDS, STEP_SCALING,
-    num, round2, dim, convert, tidy, alt, ingredientCost, energyUnitCost, hoursPerYear, equipmentHourlyCost, depreciation,
+    num, round2, dim, convert, tidy, alt, ingredientCost, energyUnitCost, hoursPerYear, equipmentHourlyCost, depreciation, burnRate,
     resolveFactor, computeRecipe,
   };
   if (typeof module === 'object' && module.exports) module.exports = api;

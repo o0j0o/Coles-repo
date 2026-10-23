@@ -104,6 +104,7 @@ CREATE TABLE IF NOT EXISTS recipe_steps (
   load_capacity REAL,
   load_unit TEXT,
   days REAL,
+  temp REAL,
   store_qty REAL,
   store_unit TEXT,
   energy TEXT NOT NULL DEFAULT '[]',
@@ -117,7 +118,7 @@ CREATE INDEX IF NOT EXISTS idx_steps_recipe ON recipe_steps(recipe_id);
 // Columns added after the first release. CREATE TABLE IF NOT EXISTS won't add them to an existing database.
 const ADDED_COLUMNS = {
   equipment: ['purchase_date TEXT', 'always_on INTEGER NOT NULL DEFAULT 0', 'capacity_qty REAL', 'capacity_unit TEXT'],
-  recipe_steps: ['days REAL', 'store_qty REAL', 'store_unit TEXT'],
+  recipe_steps: ['days REAL', 'store_qty REAL', 'store_unit TEXT', 'temp REAL'],
   recipes: ["source_files TEXT NOT NULL DEFAULT '[]'"],
 };
 

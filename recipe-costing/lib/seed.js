@@ -20,12 +20,17 @@ function seed(db) {
   const eq = {};
   function addEquip(key, name, kind, cost, salvage, life, hours, maint, use, notes, store) {
     eq[key] = Number(equip.run(name, kind, cost, salvage, life, hours, maint,
-      JSON.stringify(use.map(([k, qty, per]) => ({ energy_id: en[k], qty, per: per || 'hour' }))), notes || null,
+      JSON.stringify(use.map(([k, qty, per, rates]) => Object.assign({ energy_id: en[k], qty, per: per || 'hour' },
+        rates ? { rates: rates.map(([temp, q]) => ({ temp, qty: q })) } : {}))), notes || null,
       store ? 1 : 0, store ? store[0] : null, store ? store[1] : null).lastInsertRowid);
   }
-  addEquip('pellet', 'Pellet smoker', 'smoker', 2500, 300, 5, 800, 150, [['pellets', 2], ['power', 0.3]]);
-  addEquip('offset', 'Charcoal smoker', 'smoker', 1200, 100, 8, 400, 50, [['charcoal', 1.5], ['chips', 0.5]]);
-  addEquip('grill', 'Charcoal grill', 'grill', 900, 50, 6, 200, 40, [['charcoal', 2]]);
+  // Burn rates by cooking temperature (°F, per hour) are placeholders: weigh your fuel before and after a cook to get yours.
+  addEquip('pellet', 'Pellet smoker', 'smoker', 2500, 300, 5, 800, 150,
+    [['pellets', 2, 'hour', [[180, 1], [225, 1.5], [275, 2], [350, 2.75], [400, 3.5]]], ['power', 0.3]]);
+  addEquip('offset', 'Charcoal smoker', 'smoker', 1200, 100, 8, 400, 50,
+    [['charcoal', 1.5, 'hour', [[225, 1.25], [275, 1.75], [325, 2.25]]], ['chips', 0.5]]);
+  addEquip('grill', 'Charcoal grill', 'grill', 900, 50, 6, 200, 40,
+    [['charcoal', 3, 'hour', [[250, 1.5], [350, 2.5], [400, 3], [500, 4]]]]);
   addEquip('dehyd', 'Dehydrator', 'dehydrator', 600, 0, 5, 1000, 20, [['power', 0.6]], 'About 1000 W element; thermostat cycles so real use is lower');
   addEquip('grinder', 'Meat grinder', 'grinder', 900, 0, 8, 150, 40, [['power', 0.75]]);
   addEquip('stuffer', 'Sausage stuffer', 'stuffer', 700, 0, 10, 100, 20, []);
@@ -67,17 +72,19 @@ function seed(db) {
     pack_unit, sell_price, method, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const line = db.prepare(`INSERT INTO recipe_lines (recipe_id, ingredient_id, qty, unit, basis, note, sort_order)
     VALUES (?, ?, ?, ?, ?, ?, ?)`);
-  const step = db.prepare(`INSERT INTO recipe_steps (recipe_id, label, equipment_id, hours, scaling, load_capacity, load_unit,
-    days, store_qty, store_unit, energy, labor_hours, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const step = db.prepare(`INSERT INTO recipe_steps (recipe_id, label, equipment_id, hours, temp, scaling, load_capacity, load_unit,
+    days, store_qty, store_unit, energy, labor_hours, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  // A step uses its equipment's fuel lines; ones with temperature burn rates follow the step's temperature.
   function equipEnergy(key) {
-    return db.prepare('SELECT energy_use FROM equipment WHERE id = ?').get(eq[key]).energy_use;
+    return JSON.stringify(JSON.parse(db.prepare('SELECT energy_use FROM equipment WHERE id = ?').get(eq[key]).energy_use)
+      .map(u => ({ energy_id: u.energy_id, qty: u.rates ? null : u.qty, per: u.per })));
   }
   function addRecipe(r, lines, steps) {
     const id = Number(recipe.run(r.name, r.product, r.description || null, r.yield_qty, r.yield_unit, r.density || null,
       r.pack_name || null, r.pack_qty || null, r.pack_unit || null, r.sell_price || null, r.method || null,
       'Sample recipe with placeholder prices. Edit or delete it.').lastInsertRowid);
     lines.forEach(([k, qty, unit, basis, note], n) => line.run(id, i[k], qty, unit, basis || 'batch', note || null, n));
-    steps.forEach((s, n) => step.run(id, s.label, s.equip ? eq[s.equip] : null, s.hours || 0, s.scaling || 'fixed',
+    steps.forEach((s, n) => step.run(id, s.label, s.equip ? eq[s.equip] : null, s.hours || 0, s.temp || null, s.scaling || 'fixed',
       s.cap || null, s.capUnit || null, s.days || null, s.store || null, s.storeUnit || null, s.equip ? equipEnergy(s.equip) : '[]', s.labor || 0, n));
   }
 
@@ -107,7 +114,7 @@ function seed(db) {
   ], [
     { label: 'Slice and mix marinade', hours: 0, scaling: 'linear', labor: 1.5 },
     { label: 'Marinate overnight', equip: 'fridge', scaling: 'storage', days: 1, store: 6, storeUnit: 'kg' },
-    { label: 'Smoke', equip: 'offset', hours: 2, scaling: 'loads', cap: 2.5, capUnit: 'kg', labor: 0.5 },
+    { label: 'Smoke', equip: 'offset', hours: 2, temp: 225, scaling: 'loads', cap: 2.5, capUnit: 'kg', labor: 0.5 },
     { label: 'Dry', equip: 'dehyd', hours: 5, scaling: 'loads', cap: 1.5, capUnit: 'kg', labor: 0.25 },
     { label: 'Vacuum pack', equip: 'sealer', hours: 0.5, scaling: 'linear', labor: 0.5 },
   ]);
@@ -120,7 +127,7 @@ function seed(db) {
     ['rum', 3, 'L'], ['bonnet', 100, 'g'], ['sugar', 50, 'g'],
     ['bottle375', 1, 'each', 'per_pack'], ['label', 1, 'each', 'per_pack'],
   ], [
-    { label: 'Smoke peppers', equip: 'pellet', hours: 1, scaling: 'fixed', labor: 0.25 },
+    { label: 'Smoke peppers', equip: 'pellet', hours: 1, temp: 180, scaling: 'fixed', labor: 0.25 },
     { label: 'Infuse, strain and bottle', hours: 0, scaling: 'linear', labor: 0.75 },
   ]);
 

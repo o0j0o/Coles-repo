@@ -109,6 +109,17 @@ test('fridge storage steps save and older databases are upgraded', async () => {
   assert.equal(r.steps[0].scaling, 'storage');
   assert.equal(r.steps[0].days, 7);
   assert.equal(r.steps[0].energy[0].per, 'day');
+
+  // Burn rates by temperature are kept on equipment, and a blank step amount means "follow the temperature".
+  const sm = (await call('POST', '/api/equipment', { name: 'Smoker', energy_use: [{ energy_id: 1, qty: 2, per: 'hour',
+    rates: [{ temp: 400, qty: 3.5 }, { temp: 225, qty: '1.5' }, { temp: '', qty: 9 }] }] })).body;
+  assert.deepEqual(sm.energy_use[0].rates, [{ temp: 225, qty: 1.5 }, { temp: 400, qty: 3.5 }]);
+  const hot = (await call('POST', '/api/recipes', { name: 'Hot', steps: [{ equipment_id: sm.id, hours: 1, temp: 400,
+    energy: [{ energy_id: 1, qty: '', per: 'hour' }] }] })).body;
+  assert.equal(hot.steps[0].temp, 400);
+  assert.equal(hot.steps[0].energy[0].qty, null);
+  await call('DELETE', '/api/recipes/' + hot.id);
+  await call('DELETE', '/api/equipment/' + sm.id);
   await call('DELETE', '/api/recipes/' + r.id);
   await call('DELETE', '/api/equipment/' + fr.id);
 

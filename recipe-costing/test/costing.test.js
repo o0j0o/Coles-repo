@@ -193,3 +193,26 @@ test('ingredients without a price are flagged', () => {
   assert.equal(r.lines[0].warning, 'No price entered yet');
   assert.deepEqual(r.warnings, ['Allspice: No price entered yet']);
 });
+
+test('fuel burn rate follows the cooking temperature', () => {
+  const smoker = { id: 1, name: 'Pellet smoker', energy_use: [
+    { energy_id: 2, qty: 2, per: 'hour', rates: [{ temp: 400, qty: 3.5 }, { temp: 225, qty: 1.5 }, { temp: 275, qty: 2 }] },
+    { energy_id: 1, qty: 0.3, per: 'hour' },
+  ] };
+  near(C.burnRate(smoker, 2, 225), 1.5);
+  near(C.burnRate(smoker, 2, 250), 1.75); // halfway between 225 and 275
+  near(C.burnRate(smoker, 2, 150), 1.5);  // below the lowest: lowest rate
+  near(C.burnRate(smoker, 2, 500), 3.5);  // above the highest: highest rate
+  near(C.burnRate(smoker, 2, null), 2);   // no temperature: the average rate
+  near(C.burnRate(smoker, 1, 400), 0.3);  // no rates for this fuel: its single rate
+  assert.equal(C.burnRate(smoker, 9, 225), null);
+
+  const recipe = t => ({ yield_qty: 1, yield_unit: 'kg', steps: [{ equipment_id: 1, hours: 4, temp: t, scaling: 'fixed',
+    energy: [{ energy_id: 2, qty: '', per: 'hour' }, { energy_id: 2, qty: 1, per: 'hour' }] }] });
+  const run = t => C.computeRecipe({ recipe: recipe(t), equipmentById: { 1: smoker }, energyById: ens }).steps[0].energy;
+  near(run(225)[0].qty, 6);   // 1.5 lb/h x 4 h
+  near(run(400)[0].qty, 14);  // 3.5 lb/h x 4 h
+  assert.equal(run(400)[0].auto, true);
+  near(run(400)[1].qty, 4);   // a typed-in rate is kept whatever the temperature
+  near(run(400)[0].cost, 14 * 1.5);
+});
