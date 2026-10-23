@@ -126,7 +126,8 @@ function seed(db) {
   ], [
     { label: 'Slice and mix marinade', hours: 0, scaling: 'linear', labor: 1.5 },
     { label: 'Marinate overnight', equip: 'fridge', scaling: 'storage', days: 1, store: 6, storeUnit: 'kg' },
-    { label: 'Smoke until dry', equip: 'pellet', hours: 5, temp: 180, scaling: 'loads', cap: 5, capUnit: 'kg', labor: 0.75 },
+    // With stacked jerky racks the Ironwood XL takes well over 5 kg in one smoke; 10 kg finished is a placeholder.
+    { label: 'Smoke until dry', equip: 'pellet', hours: 5, temp: 180, scaling: 'loads', cap: 10, capUnit: 'kg', labor: 0.75 },
     { label: 'Vacuum pack', equip: 'sealer', hours: 0.5, scaling: 'linear', labor: 0.5 },
   ]);
 
