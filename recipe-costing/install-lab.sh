@@ -21,6 +21,20 @@ if [ -d ../.git ]; then
   git -C .. pull --ff-only || echo "Could not update (local changes?). Continuing with the current code."
 fi
 
+new_password=""
+if [ ! -f .env ] && [ ! -t 0 ]; then
+  # No one at the keyboard (e.g. run by an assistant): make a strong password and show it once at the end.
+  say "First-time setup (no terminal attached, so a password is generated)"
+  new_password=$(head -c 18 /dev/urandom | base64 | tr -d '/+=' | head -c 20)
+  {
+    echo "APP_PASSWORD='$new_password'"
+    echo "SESSION_SECRET=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+    echo "TZ=America/Barbados"
+    echo "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}"
+  } > .env
+  chmod 600 .env
+fi
+
 if [ ! -f .env ]; then
   say "First-time setup"
   while :; do
@@ -63,5 +77,10 @@ fi
 
 say "The recipe app is running:"
 echo "  $url"
+if [ -n "$new_password" ]; then
+  echo
+  echo "  App password: $new_password"
+  echo "  (saved in recipe-costing/.env; change it there and run this script again)"
+fi
 echo
 echo "Open it on any device signed in to your Tailscale. On iPhone: Safari, Share, Add to Home Screen."
