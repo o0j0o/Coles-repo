@@ -2,6 +2,18 @@
 // Starter data so the app is usable on first run. Every price, rate and
 // recipe here is a placeholder; replace them with your real numbers.
 
+// Ironwood XL pellet use is estimated, not measured: published pellet-grill figures (about 0.007 lb/h per °F
+// above outside temperature) adjusted to a sheltered Barbados pit at about 85°F and about 20% less loss for the
+// double-wall box: 0.15 + 0.0058 x (cook temp - 85) lb/h. Replace with your own weighed figures.
+const IRONWOOD = {
+  name: 'Traeger Ironwood XL',
+  pelletsPerHour: 1.25,
+  pelletRates: [[165, 0.6], [180, 0.7], [225, 0.95], [250, 1.1], [275, 1.25], [300, 1.4], [350, 1.7], [400, 2], [450, 2.25], [500, 2.55]],
+  notes: 'Pellet burn rates are estimates for a sheltered Barbados pit (about 30°C by day, 26-27°C at night) and the '
+    + 'double-wall insulated box, worked out from published pellet-grill figures. Weigh pellets before and after a few '
+    + 'cooks and replace them with your own. Price, life and electricity use are placeholders too.',
+};
+
 function seed(db) {
   const energy = db.prepare(`INSERT INTO energy_sources (name, kind, unit, pack_label, pack_size, pack_price, notes, price_date)
     VALUES (?, ?, ?, ?, ?, ?, ?, date('now'))`);
@@ -25,15 +37,8 @@ function seed(db) {
       store ? 1 : 0, store ? store[0] : null, store ? store[1] : null).lastInsertRowid);
   }
   // Burn rates by cooking temperature (°F, per hour) are placeholders: weigh your fuel before and after a cook to get yours.
-  // Ironwood XL pellet use is estimated, not measured: published pellet-grill figures (about 0.007 lb/h per °F
-  // above outside temperature) adjusted to a sheltered Barbados pit at about 85°F and about 20% less loss for the
-  // double-wall box: 0.15 + 0.0058 x (cook temp - 85) lb/h. Replace with your own weighed figures.
-  addEquip('pellet', 'Traeger Ironwood XL', 'smoker', 2500, 300, 5, 800, 150,
-    [['pellets', 1.25, 'hour', [[165, 0.6], [180, 0.7], [225, 0.95], [250, 1.1], [275, 1.25], [300, 1.4], [350, 1.7],
-      [400, 2], [450, 2.25], [500, 2.55]]], ['power', 0.3]],
-    'Pellet burn rates are estimates for a sheltered Barbados pit (about 30°C by day, 26-27°C at night) and the '
-    + 'double-wall insulated box, worked out from published pellet-grill figures. Weigh pellets before and after a few '
-    + 'cooks and replace them with your own. Price, life and electricity use are placeholders too.');
+  addEquip('pellet', IRONWOOD.name, 'smoker', 2500, 300, 5, 800, 150,
+    [['pellets', IRONWOOD.pelletsPerHour, 'hour', IRONWOOD.pelletRates], ['power', 0.3]], IRONWOOD.notes);
   addEquip('offset', 'Charcoal smoker', 'smoker', 1200, 100, 8, 400, 50,
     [['charcoal', 1.5, 'hour', [[225, 1.25], [275, 1.75], [325, 2.25]]], ['chips', 0.5]]);
   addEquip('grill', 'Charcoal grill', 'grill', 900, 50, 6, 200, 40,
@@ -121,7 +126,7 @@ function seed(db) {
   ], [
     { label: 'Slice and mix marinade', hours: 0, scaling: 'linear', labor: 1.5 },
     { label: 'Marinate overnight', equip: 'fridge', scaling: 'storage', days: 1, store: 6, storeUnit: 'kg' },
-    { label: 'Smoke', equip: 'offset', hours: 2, temp: 225, scaling: 'loads', cap: 2.5, capUnit: 'kg', labor: 0.5 },
+    { label: 'Smoke', equip: 'pellet', hours: 3, temp: 180, scaling: 'loads', cap: 5, capUnit: 'kg', labor: 0.5 },
     { label: 'Dry', equip: 'dehyd', hours: 5, scaling: 'loads', cap: 1.5, capUnit: 'kg', labor: 0.25 },
     { label: 'Vacuum pack', equip: 'sealer', hours: 0.5, scaling: 'linear', labor: 0.5 },
   ]);
@@ -141,4 +146,25 @@ function seed(db) {
   db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('labor_rate', '15')").run();
 }
 
-module.exports = { seed };
+// Bring sample data in an existing database up to date, but only rows still exactly as first supplied:
+// anything the owner has edited is left alone.
+function upgradeSamples(db) {
+  const cols = new Set(db.prepare('PRAGMA table_info(equipment)').all().map(c => c.name));
+  if (!cols.has('energy_use') || !cols.has('notes')) return;
+  const row = db.prepare("SELECT id, energy_use FROM equipment WHERE name = 'Pellet smoker'").get();
+  if (!row) return;
+  let use;
+  try { use = JSON.parse(row.energy_use); } catch { return; }
+  const oldPellets = JSON.stringify([[180, 1], [225, 1.5], [275, 2], [350, 2.75], [400, 3.5]]);
+  const pellets = use[0];
+  const untouched = use.length === 2 && pellets && pellets.qty === 2 && pellets.per === 'hour'
+    && JSON.stringify((pellets.rates || []).map(r => [r.temp, r.qty])) === oldPellets
+    && use[1].qty === 0.3 && use[1].per === 'hour';
+  if (!untouched) return;
+  pellets.qty = IRONWOOD.pelletsPerHour;
+  pellets.rates = IRONWOOD.pelletRates.map(([temp, qty]) => ({ temp, qty }));
+  db.prepare("UPDATE equipment SET name = ?, energy_use = ?, notes = ?, updated_at = datetime('now') WHERE id = ?")
+    .run(IRONWOOD.name, JSON.stringify(use), IRONWOOD.notes, row.id);
+}
+
+module.exports = { seed, upgradeSamples };

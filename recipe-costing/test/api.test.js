@@ -167,6 +167,33 @@ test('reading a recipe saves the original pages and keeps them with the recipe',
   assert.equal((await call('GET', '/api/bootstrap')).body.features.recipe_reader, true);
 });
 
+test('the old sample pellet smoker is upgraded to the Ironwood XL figures, unless it was edited', () => {
+  const { open } = require('../lib/db');
+  const oldUse = pellets => JSON.stringify([{ energy_id: 4, qty: pellets, per: 'hour',
+    rates: [[180, 1], [225, 1.5], [275, 2], [350, 2.75], [400, 3.5]].map(([temp, qty]) => ({ temp, qty })) },
+    { energy_id: 1, qty: 0.3, per: 'hour' }]);
+  const make = pellets => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'recipes-up-'));
+    const first = open(d);
+    first.prepare("UPDATE equipment SET name = 'Pellet smoker', energy_use = ? WHERE name = 'Traeger Ironwood XL'").run(oldUse(pellets));
+    first.close();
+    const again = open(d);
+    const rows = again.prepare("SELECT name, energy_use FROM equipment WHERE name IN ('Pellet smoker', 'Traeger Ironwood XL')").all();
+    again.close();
+    fs.rmSync(d, { recursive: true, force: true });
+    return rows;
+  };
+  const upgraded = make(2);
+  assert.equal(upgraded[0].name, 'Traeger Ironwood XL');
+  const use = JSON.parse(upgraded[0].energy_use);
+  assert.equal(use[0].qty, 1.25);
+  assert.deepEqual(use[0].rates.find(r => r.temp === 225), { temp: 225, qty: 0.95 });
+  assert.equal(use[0].energy_id, 4, 'keeps the pellets it points at');
+  const edited = make(1.8);
+  assert.equal(edited[0].name, 'Pellet smoker', 'an edited smoker is left alone');
+  assert.equal(JSON.parse(edited[0].energy_use)[0].qty, 1.8);
+});
+
 test('settings save', async () => {
   const s = (await call('PUT', '/api/settings', { labor_rate: '18.5', 'bad key': 'x' })).body;
   assert.equal(s.labor_rate, '18.5');

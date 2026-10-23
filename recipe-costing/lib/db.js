@@ -153,6 +153,7 @@ function open(dataDir) {
     require('./seed').seed(db);
   }
   db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('seeded', '1')").run();
+  require('./seed').upgradeSamples(db);
   return db;
 }
 
