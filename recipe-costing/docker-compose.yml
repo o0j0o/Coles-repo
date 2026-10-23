@@ -1,0 +1,18 @@
+services:
+  recipes:
+    build: .
+    image: recipe-costing:latest
+    container_name: recipe-costing
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      APP_PASSWORD: ${APP_PASSWORD:?Set APP_PASSWORD in a .env file next to this one}
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      TZ: ${TZ:-America/Barbados}
+    volumes:
+      - recipes-data:/data
+
+volumes:
+  recipes-data:

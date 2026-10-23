@@ -1,5 +1,7 @@
 # Fence Estimator
 
+> This repository also holds **Recipe Costing**, a recipe scaling and production cost app for Black Belly Smokers, in [`recipe-costing/`](recipe-costing/README.md).
+
 A web app for estimating fence jobs. You enter measurements or trace the fence on a photo or drawing of the site, choose a fence type, and get a full material list, cost, price and printable customer quote. It works on a desktop and on an iPhone, and you can add it to your Home Screen like an app.
 
 ## What it does
