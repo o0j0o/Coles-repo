@@ -25,8 +25,15 @@ function seed(db) {
       store ? 1 : 0, store ? store[0] : null, store ? store[1] : null).lastInsertRowid);
   }
   // Burn rates by cooking temperature (°F, per hour) are placeholders: weigh your fuel before and after a cook to get yours.
-  addEquip('pellet', 'Pellet smoker', 'smoker', 2500, 300, 5, 800, 150,
-    [['pellets', 2, 'hour', [[180, 1], [225, 1.5], [275, 2], [350, 2.75], [400, 3.5]]], ['power', 0.3]]);
+  // Ironwood XL pellet use is estimated, not measured: published pellet-grill figures (about 0.007 lb/h per °F
+  // above outside temperature) adjusted to a sheltered Barbados pit at about 85°F and about 20% less loss for the
+  // double-wall box: 0.15 + 0.0058 x (cook temp - 85) lb/h. Replace with your own weighed figures.
+  addEquip('pellet', 'Traeger Ironwood XL', 'smoker', 2500, 300, 5, 800, 150,
+    [['pellets', 1.25, 'hour', [[165, 0.6], [180, 0.7], [225, 0.95], [250, 1.1], [275, 1.25], [300, 1.4], [350, 1.7],
+      [400, 2], [450, 2.25], [500, 2.55]]], ['power', 0.3]],
+    'Pellet burn rates are estimates for a sheltered Barbados pit (about 30°C by day, 26-27°C at night) and the '
+    + 'double-wall insulated box, worked out from published pellet-grill figures. Weigh pellets before and after a few '
+    + 'cooks and replace them with your own. Price, life and electricity use are placeholders too.');
   addEquip('offset', 'Charcoal smoker', 'smoker', 1200, 100, 8, 400, 50,
     [['charcoal', 1.5, 'hour', [[225, 1.25], [275, 1.75], [325, 2.25]]], ['chips', 0.5]]);
   addEquip('grill', 'Charcoal grill', 'grill', 900, 50, 6, 200, 40,
