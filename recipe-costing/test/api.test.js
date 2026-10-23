@@ -98,6 +98,34 @@ test('ingredient in a recipe cannot be deleted', async () => {
   assert.equal(res.status, 409);
 });
 
+test('fridge storage steps save and older databases are upgraded', async () => {
+  const fr = (await call('POST', '/api/equipment', { name: 'Walk-in', always_on: true, capacity_qty: 300, capacity_unit: 'kg', purchase_date: '2025-03-01' })).body;
+  assert.equal(fr.always_on, 1);
+  assert.equal(fr.capacity_unit, 'kg');
+  const r = (await call('POST', '/api/recipes', { name: 'Pastrami', yield_qty: 4, yield_unit: 'kg',
+    steps: [{ label: 'Cure', equipment_id: fr.id, scaling: 'storage', days: 7, store_qty: 6, store_unit: 'kg', energy: [{ energy_id: 1, qty: 3, per: 'day' }] }] })).body;
+  assert.equal(r.steps[0].scaling, 'storage');
+  assert.equal(r.steps[0].days, 7);
+  assert.equal(r.steps[0].energy[0].per, 'day');
+  await call('DELETE', '/api/recipes/' + r.id);
+  await call('DELETE', '/api/equipment/' + fr.id);
+
+  // A database from before these columns existed gets them added on open.
+  const { DatabaseSync } = require('node:sqlite');
+  const old = fs.mkdtempSync(path.join(os.tmpdir(), 'recipes-old-'));
+  const raw = new DatabaseSync(path.join(old, 'recipes.db'));
+  raw.exec(`CREATE TABLE equipment (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+    CREATE TABLE recipe_steps (id INTEGER PRIMARY KEY, recipe_id INTEGER);
+    CREATE TABLE ingredients (id INTEGER PRIMARY KEY, name TEXT); INSERT INTO ingredients (name) VALUES ('x');`);
+  raw.close();
+  const upgraded = require('../lib/db').open(old);
+  const cols = t => upgraded.prepare(`PRAGMA table_info(${t})`).all().map(c => c.name);
+  assert.ok(cols('equipment').includes('always_on') && cols('equipment').includes('capacity_unit'));
+  assert.ok(cols('recipe_steps').includes('days') && cols('recipe_steps').includes('store_unit'));
+  upgraded.close();
+  fs.rmSync(old, { recursive: true, force: true });
+});
+
 test('settings save', async () => {
   const s = (await call('PUT', '/api/settings', { labor_rate: '18.5', 'bad key': 'x' })).body;
   assert.equal(s.labor_rate, '18.5');
@@ -112,5 +140,6 @@ test('backup and restore round trip', async () => {
   const after = (await call('GET', '/api/bootstrap')).body;
   assert.ok(!after.ingredients.some(i => i.name === 'Temporary'));
   assert.equal(after.recipes.length, 3);
-  assert.ok(after.recipes[1].steps[1].energy.length > 0);
+  assert.ok(after.recipes[1].steps[2].energy.length > 0);
+  assert.equal(after.recipes[1].steps[1].scaling, 'storage');
 });

@@ -38,13 +38,15 @@
   const PRODUCTS = ['pepper sauce', 'smoked pâté', 'pastrami', 'jerky', 'meat sticks', 'infused rum', 'other'];
   const ENERGY_KINDS = ['electricity', 'propane', 'charcoal', 'wood pellets', 'wood chips', 'wood chunks', 'natural gas', 'other'];
   const ENERGY_UNITS = ['kWh', 'lb', 'kg', 'L', 'gal', 'bag', 'cylinder'];
-  const EQUIPMENT_KINDS = ['smoker', 'dehydrator', 'oven', 'stove / burner', 'grinder', 'stuffer', 'mixer / blender',
-    'vacuum sealer', 'fridge / freezer', 'bottling', 'other'];
+  const EQUIPMENT_KINDS = ['smoker', 'grill', 'dehydrator', 'oven', 'stove / burner', 'grinder', 'slicer', 'stuffer',
+    'mixer / blender', 'vacuum sealer', 'fridge / freezer', 'bottling', 'other'];
   const STEP_SCALING = {
     fixed: 'same for any batch size',
     linear: 'grows with batch size',
     loads: 'per load (by capacity)',
+    storage: 'days in fridge / freezer',
   };
+  const HOURS_PER_YEAR_ALWAYS_ON = 24 * 365;
 
   function num(v, d) {
     const n = typeof v === 'number' ? v : parseFloat(v);
@@ -125,14 +127,40 @@
     return num(en.pack_price) / size;
   }
 
+  // Equipment that is never switched off (fridges, freezers) wears out by the clock.
+  function hoursPerYear(eq) {
+    return num(eq.always_on) ? HOURS_PER_YEAR_ALWAYS_ON : num(eq.hours_per_year);
+  }
+
   // Wear and upkeep per hour of use: (cost - resale) spread over its working life, plus yearly maintenance.
   function equipmentHourlyCost(eq) {
     if (!eq) return 0;
-    const hoursPerYear = num(eq.hours_per_year);
-    const lifeHours = num(eq.life_years) * hoursPerYear;
+    const yearHours = hoursPerYear(eq);
+    const lifeHours = num(eq.life_years) * yearHours;
     const wear = lifeHours > 0 ? Math.max(0, num(eq.purchase_cost) - num(eq.salvage_value)) / lifeHours : 0;
-    const upkeep = hoursPerYear > 0 ? num(eq.maintenance_per_year) / hoursPerYear : 0;
+    const upkeep = yearHours > 0 ? num(eq.maintenance_per_year) / yearHours : 0;
     return wear + upkeep;
+  }
+
+  /**
+   * Straight-line depreciation summary for one piece of equipment.
+   * Costing uses hours of use; the book value here is by age, for reference.
+   */
+  function depreciation(eq, asOf) {
+    const cost = num(eq.purchase_cost);
+    const salvage = Math.min(num(eq.salvage_value), cost);
+    const life = num(eq.life_years);
+    const perYear = life > 0 ? (cost - salvage) / life : 0;
+    const out = { perYear, perHour: equipmentHourlyCost(eq), lifeHours: life * hoursPerYear(eq), ageYears: null, bookValue: null, yearsLeft: null };
+    const bought = eq.purchase_date ? new Date(eq.purchase_date + 'T00:00:00') : null;
+    if (bought && !isNaN(bought)) {
+      const now = asOf ? new Date(asOf) : new Date();
+      const age = Math.max(0, (now - bought) / (365.25 * 86400000));
+      out.ageYears = age;
+      out.bookValue = Math.max(salvage, cost - perYear * age);
+      out.yearsLeft = life > 0 ? Math.max(0, life - age) : null;
+    }
+    return out;
   }
 
   // ---------- scaling ----------
@@ -231,18 +259,28 @@
       const eq = eqs[st.equipment_id];
       let runs = 1;
       let mult = 1;
+      let share = 1; // part of a fridge or freezer this batch takes up
+      let days = 0;
       let warning = null;
       if (st.scaling === 'linear') mult = factor;
+      else if (st.scaling === 'storage') {
+        days = num(st.days);
+        const stored = num(st.store_qty) > 0 ? num(st.store_qty) * factor : outQty;
+        const storeUnit = num(st.store_qty) > 0 ? (st.store_unit || output.unit) : output.unit;
+        const cap = eq ? convert(eq.capacity_qty, eq.capacity_unit, storeUnit, recipe.density) : NaN;
+        if (Number.isFinite(cap) && cap > 0) share = Math.min(1, stored / cap);
+        else if (eq) warning = `Set how much ${eq.name} holds (on the Equipment page), or the whole unit is charged`;
+      }
       else if (st.scaling === 'loads') {
         const cap = convert(st.load_capacity, st.load_unit || output.unit, output.unit, recipe.density);
         if (Number.isFinite(cap) && cap > 0) runs = Math.max(1, Math.ceil(outQty / cap - 1e-9));
         else warning = 'Set how much one load holds';
         mult = runs;
       }
-      const hours = num(st.hours) * mult;
+      const hours = st.scaling === 'storage' ? days * 24 : num(st.hours) * mult;
       const energy = (st.energy || []).filter(e => e.energy_id).map(e => {
         const en = ens[e.energy_id];
-        const qty = num(e.qty) * (e.per === 'run' ? mult : hours);
+        const qty = num(e.qty) * (e.per === 'run' ? mult : e.per === 'day' ? hours / 24 : hours) * share;
         const cost = qty * energyUnitCost(en);
         const key = e.energy_id;
         if (!energyTotals[key]) energyTotals[key] = { energy_id: key, name: en ? en.name : '(missing)', unit: en ? en.unit : '', qty: 0, cost: 0 };
@@ -251,14 +289,14 @@
         return { energy_id: e.energy_id, name: en ? en.name : '(missing energy source)', unit: en ? en.unit : '', qty, cost };
       });
       const energyCost = energy.reduce((s, e) => s + e.cost, 0);
-      const equipmentCost = eq ? equipmentHourlyCost(eq) * hours : 0;
+      const equipmentCost = eq ? equipmentHourlyCost(eq) * hours * share : 0;
       const laborHours = num(st.labor_hours) * mult;
       const laborCost = laborHours * laborRate;
       if (st.equipment_id && !eq) warning = 'Equipment not found';
       if (warning) warnings.push(`${st.label || 'Step ' + (index + 1)}: ${warning}`);
       return {
         index, label: st.label || (eq ? eq.name : 'Step ' + (index + 1)), equipment_id: st.equipment_id || null,
-        equipmentName: eq ? eq.name : '', scaling: st.scaling || 'fixed', runs, hours, energy, energyCost,
+        equipmentName: eq ? eq.name : '', scaling: st.scaling || 'fixed', runs, hours, days, share, energy, energyCost,
         equipmentCost, laborHours, laborCost, warning,
       };
     });
@@ -305,7 +343,7 @@
 
   const api = {
     UNITS, UNIT_GROUPS, INGREDIENT_CATEGORIES, PRODUCTS, ENERGY_KINDS, ENERGY_UNITS, EQUIPMENT_KINDS, STEP_SCALING,
-    num, round2, dim, convert, tidy, alt, ingredientCost, energyUnitCost, equipmentHourlyCost,
+    num, round2, dim, convert, tidy, alt, ingredientCost, energyUnitCost, hoursPerYear, equipmentHourlyCost, depreciation,
     resolveFactor, computeRecipe,
   };
   if (typeof module === 'object' && module.exports) module.exports = api;

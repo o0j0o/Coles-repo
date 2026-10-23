@@ -125,10 +125,10 @@ function requireName(body, what) {
   if (!body.name || !String(body.name).trim()) throw new HttpError(400, what + ' name is required');
 }
 
-// Energy lists are stored as JSON: [{ energy_id, qty, per: 'hour' | 'run' }]
+// Energy lists are stored as JSON: [{ energy_id, qty, per: 'hour' | 'run' | 'day' }]
 function cleanEnergy(list) {
   return JSON.stringify((Array.isArray(list) ? list : []).filter(e => e && e.energy_id).map(e => ({
-    energy_id: Number(e.energy_id), qty: Number(e.qty) || 0, per: e.per === 'run' ? 'run' : 'hour',
+    energy_id: Number(e.energy_id), qty: Number(e.qty) || 0, per: ['run', 'day'].includes(e.per) ? e.per : 'hour',
   })));
 }
 
@@ -143,17 +143,18 @@ const INGREDIENT_FIELDS = ['name', 'category', 'supplier', 'purchase_qty', 'purc
   'density', 'price_date', 'notes', 'active'];
 const ENERGY_FIELDS = ['name', 'kind', 'unit', 'pack_label', 'pack_size', 'pack_price', 'price_date', 'notes', 'active'];
 const EQUIPMENT_FIELDS = ['name', 'kind', 'purchase_cost', 'salvage_value', 'life_years', 'hours_per_year',
-  'maintenance_per_year', 'notes', 'active'];
+  'maintenance_per_year', 'purchase_date', 'always_on', 'capacity_qty', 'capacity_unit', 'notes', 'active'];
 const RECIPE_FIELDS = ['name', 'product', 'code', 'description', 'yield_qty', 'yield_unit', 'density', 'pack_name',
   'pack_qty', 'pack_unit', 'sell_price', 'method', 'notes', 'active'];
 const LINE_FIELDS = ['ingredient_id', 'qty', 'unit', 'basis', 'note'];
-const STEP_FIELDS = ['label', 'equipment_id', 'hours', 'scaling', 'load_capacity', 'load_unit', 'labor_hours', 'notes'];
+const STEP_FIELDS = ['label', 'equipment_id', 'hours', 'scaling', 'load_capacity', 'load_unit', 'days', 'store_qty', 'store_unit',
+  'labor_hours', 'notes'];
 
 // Defaults for NOT NULL columns, so a blank field in the form doesn't fail the save.
 const DEFAULTS = {
   ingredients: { category: 'other', purchase_qty: 1, purchase_unit: 'kg', purchase_price: 0, yield_pct: 100 },
   energy_sources: { kind: 'other', unit: 'kWh', pack_size: 1, pack_price: 0 },
-  equipment: { kind: 'other', purchase_cost: 0, salvage_value: 0, life_years: 5, hours_per_year: 500, maintenance_per_year: 0 },
+  equipment: { kind: 'other', purchase_cost: 0, salvage_value: 0, life_years: 5, hours_per_year: 500, maintenance_per_year: 0, always_on: 0 },
   recipes: { product: 'other', yield_qty: 1, yield_unit: 'kg' },
 };
 function withDefaults(table, row) {
@@ -208,7 +209,7 @@ function saveRecipe(body, id) {
         if (row.equipment_id && !db.prepare('SELECT 1 FROM equipment WHERE id = ?').get(row.equipment_id)) throw new HttpError(400, 'Unknown equipment in recipe');
         Object.assign(row, {
           recipe_id: id, sort_order: i, hours: Number(row.hours) || 0, labor_hours: Number(row.labor_hours) || 0,
-          scaling: ['fixed', 'linear', 'loads'].includes(row.scaling) ? row.scaling : 'fixed', energy: cleanEnergy(s.energy),
+          scaling: ['fixed', 'linear', 'loads', 'storage'].includes(row.scaling) ? row.scaling : 'fixed', energy: cleanEnergy(s.energy),
         });
         insert('recipe_steps', row);
       });

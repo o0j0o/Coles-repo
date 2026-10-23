@@ -50,6 +50,10 @@ CREATE TABLE IF NOT EXISTS equipment (
   life_years REAL NOT NULL DEFAULT 5,
   hours_per_year REAL NOT NULL DEFAULT 500,
   maintenance_per_year REAL NOT NULL DEFAULT 0,
+  purchase_date TEXT,
+  always_on INTEGER NOT NULL DEFAULT 0,
+  capacity_qty REAL,
+  capacity_unit TEXT,
   energy_use TEXT NOT NULL DEFAULT '[]',
   notes TEXT,
   active INTEGER NOT NULL DEFAULT 1,
@@ -98,6 +102,9 @@ CREATE TABLE IF NOT EXISTS recipe_steps (
   scaling TEXT NOT NULL DEFAULT 'fixed',
   load_capacity REAL,
   load_unit TEXT,
+  days REAL,
+  store_qty REAL,
+  store_unit TEXT,
   energy TEXT NOT NULL DEFAULT '[]',
   labor_hours REAL NOT NULL DEFAULT 0,
   notes TEXT,
@@ -105,6 +112,19 @@ CREATE TABLE IF NOT EXISTS recipe_steps (
 );
 CREATE INDEX IF NOT EXISTS idx_steps_recipe ON recipe_steps(recipe_id);
 `;
+
+// Columns added after the first release. CREATE TABLE IF NOT EXISTS won't add them to an existing database.
+const ADDED_COLUMNS = {
+  equipment: ['purchase_date TEXT', 'always_on INTEGER NOT NULL DEFAULT 0', 'capacity_qty REAL', 'capacity_unit TEXT'],
+  recipe_steps: ['days REAL', 'store_qty REAL', 'store_unit TEXT'],
+};
+
+function migrate(db) {
+  Object.entries(ADDED_COLUMNS).forEach(([table, cols]) => {
+    const have = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map(c => c.name));
+    cols.forEach(def => { if (!have.has(def.split(' ')[0])) db.exec(`ALTER TABLE ${table} ADD COLUMN ${def}`); });
+  });
+}
 
 const DEFAULT_SETTINGS = {
   company_name: 'Black Belly Smokers',
@@ -119,6 +139,7 @@ function open(dataDir) {
   const db = new DatabaseSync(path.join(dataDir, 'recipes.db'));
   db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
   db.exec(SCHEMA);
+  migrate(db);
 
   const insertSetting = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
   for (const [k, v] of Object.entries(DEFAULT_SETTINGS)) insertSetting.run(k, v);

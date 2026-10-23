@@ -136,3 +136,53 @@ test('percent of mix covers batch ingredients by weight', () => {
   const r = run({ yield_qty: 1, yield_unit: 'kg', lines: [{ ingredient_id: 1, qty: 975, unit: 'g' }, { ingredient_id: 2, qty: 25, unit: 'g' }] });
   near(r.lines[1].pct, 2.5);
 });
+
+test('always-on equipment wears by the clock and has a straight-line book value', () => {
+  const fridge = { purchase_cost: 3700, salvage_value: 200, life_years: 10, hours_per_year: 0, maintenance_per_year: 0, always_on: 1 };
+  near(C.hoursPerYear(fridge), 8760);
+  near(C.equipmentHourlyCost(fridge), 350 / 8760);
+  const d = C.depreciation(Object.assign({ purchase_date: '2024-01-01' }, fridge), '2026-01-01T00:00:00');
+  near(d.perYear, 350);
+  near(d.ageYears, 2, 0.01);
+  near(d.bookValue, 3700 - 700, 2);
+  near(d.yearsLeft, 8, 0.01);
+  assert.equal(C.depreciation(fridge).bookValue, null);
+  // Never below resale value
+  near(C.depreciation(Object.assign({ purchase_date: '2000-01-01' }, fridge)).bookValue, 200);
+});
+
+test('storage steps charge a share of the fridge for the days held', () => {
+  const ingsLocal = {};
+  const fridge = { id: 7, name: 'Fridge', purchase_cost: 8760 * 10 + 0, salvage_value: 0, life_years: 10, always_on: 1, capacity_qty: 100, capacity_unit: 'kg' };
+  const recipe = {
+    yield_qty: 10, yield_unit: 'kg', lines: [],
+    steps: [{ label: 'Cure', equipment_id: 7, scaling: 'storage', days: 7, store_qty: 20, store_unit: 'kg', labor_hours: 0.5,
+      energy: [{ energy_id: 1, qty: 4, per: 'day' }] }],
+  };
+  const res = r => C.computeRecipe({ recipe, scale: r, ingredientsById: ingsLocal, equipmentById: { 7: fridge }, energyById: ens, settings: { labor_rate: 10 } });
+  const one = res();
+  const s = one.steps[0];
+  near(s.hours, 168);
+  near(s.share, 0.2);
+  near(s.equipmentCost, 1 * 168 * 0.2); // $1 an hour of wear
+  near(s.energy[0].qty, 4 * 7 * 0.2);
+  near(s.laborCost, 5);
+  assert.deepEqual(one.warnings, []);
+  // Double the batch takes twice the space; capped at the whole fridge
+  near(res({ mode: 'factor', factor: 2 }).steps[0].share, 0.4);
+  near(res({ mode: 'factor', factor: 10 }).steps[0].share, 1);
+  // Without a stored amount, the finished yield is used
+  recipe.steps[0].store_qty = null;
+  near(res().steps[0].share, 0.1);
+  // Without a capacity the whole unit is charged, with a warning
+  delete fridge.capacity_qty;
+  const w = res();
+  near(w.steps[0].share, 1);
+  assert.equal(w.warnings.length, 1);
+});
+
+test('per day energy on a normal step uses hours / 24', () => {
+  const r = C.computeRecipe({ recipe: { yield_qty: 1, yield_unit: 'kg', steps: [{ hours: 12, energy: [{ energy_id: 1, qty: 2, per: 'day' }] }] },
+    energyById: ens });
+  near(r.steps[0].energy[0].qty, 1);
+});
