@@ -74,7 +74,16 @@ Run the tests with `npm test`.
 
 ## Running it on your lab with Docker
 
-On the lab machine, with Docker and the Compose plugin installed:
+**Quickest way**, on the lab machine with Docker and Tailscale installed:
+
+```bash
+git clone https://github.com/o0j0o/Coles-repo.git
+cd Coles-repo/recipe-costing && ./install-lab.sh
+```
+
+The script asks for an app password (and, optionally, an Anthropic API key for photo import), starts the app, publishes it on your Tailscale network over HTTPS, and prints the address to open. Run it again any time to update to the latest code and restart.
+
+**Step by step**, on the lab machine with Docker and the Compose plugin installed:
 
 ```bash
 git clone <this repository>
