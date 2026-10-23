@@ -288,6 +288,8 @@
       let mult = 1;
       let share = 1; // part of a fridge or freezer this batch takes up
       let days = 0;
+      let fits = null; // for load steps: how much the loads this batch needs could hold
+      let fill = null; // and how full they are (0-1). A part-empty smoker burns the same fuel.
       let warning = null;
       if (st.scaling === 'linear') mult = factor;
       else if (st.scaling === 'storage') {
@@ -302,8 +304,11 @@
       }
       else if (st.scaling === 'loads') {
         const cap = convert(st.load_capacity, st.load_unit || output.unit, output.unit, recipe.density);
-        if (Number.isFinite(cap) && cap > 0) runs = Math.max(1, Math.ceil(outQty / cap - 1e-9));
-        else warning = 'Set how much one load holds';
+        if (Number.isFinite(cap) && cap > 0) {
+          runs = Math.max(1, Math.ceil(outQty / cap - 1e-9));
+          fits = runs * cap;
+          fill = outQty / fits;
+        } else warning = 'Set how much one load holds';
         mult = runs;
       }
       const hours = st.scaling === 'storage' ? days * 24 : num(st.hours) * mult;
@@ -329,7 +334,7 @@
       return {
         index, label: st.label || (eq ? eq.name : 'Step ' + (index + 1)), equipment_id: st.equipment_id || null,
         equipmentName: eq ? eq.name : '', scaling: st.scaling || 'fixed', temp: num(st.temp) > 0 ? num(st.temp) : null,
-        runs, hours, days, share, energy, energyCost,
+        runs, fits, fill, hours, days, share, energy, energyCost,
         equipmentCost, laborHours, laborCost, warning,
       };
     });

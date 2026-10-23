@@ -602,7 +602,7 @@
         const el = $('#sc-' + s.index);
         if (!el) return;
         const bits = [];
-        if (s.runs > 1 || s.scaling === 'loads') bits.push(`${s.runs} ${s.runs === 1 ? 'load' : 'loads'}`);
+        if (s.runs > 1 || s.scaling === 'loads') bits.push(`${s.runs} ${s.runs === 1 ? 'load' : 'loads'}${s.fill != null ? ` ${Math.round(s.fill * 100)}% full` : ''}`);
         if (s.scaling === 'storage') bits.push(`${qtyFmt(s.days)} ${s.days === 1 ? 'day' : 'days'} using ${pct(s.share * 100)} of the space`);
         else if (s.hours) bits.push(`${qtyFmt(s.hours)} h machine time`);
         s.energy.forEach((e, j) => {
@@ -1007,6 +1007,13 @@
   // =====================================================================
   // Make a batch: scale, cost and print
   // =====================================================================
+  // A smoker or dehydrator burns the same fuel part-empty, so point out spare room in the loads.
+  function roomLeft(res) {
+    const tips = res.steps.filter(s => s.fill != null && s.fill < 0.8).map(s =>
+      `<li><b>${esc(s.label)}</b>: ${s.runs === 1 ? 'the load is' : `the ${s.runs} loads are`} ${Math.round(s.fill * 100)}% full. Up to <b>${amount(s.fits, res.output.unit)}</b> fits in the same ${s.runs === 1 ? 'run' : 'runs'} for the same fuel and time.</li>`);
+    return tips.length ? `<div class="notice info no-print">Room to spare:<ul>${tips.join('')}</ul></div>` : '';
+  }
+
   function viewMake(id) {
     const r = S.recById[id];
     if (!r) { view.innerHTML = '<div class="empty">Recipe not found. <a href="#/">Back</a></div>'; return; }
@@ -1099,6 +1106,7 @@
           <div class="stat${costCls}"><div class="k">Batch cost</div><div class="v">${money(t.total)}</div></div>
           ${t.perPack != null ? `<div class="stat${costCls}"><div class="k">Per ${esc(r.pack_name || 'pack')}</div><div class="v">${money(t.perPack)}</div></div>` : ''}
         </div>
+        ${roomLeft(res)}
         ${res.warnings.length ? `<div class="notice no-print">Check these:<ul>${res.warnings.map(w => `<li>${esc(w)}</li>`).join('')}</ul></div>` : ''}
         <section class="card">
           <h2>Ingredients</h2>
@@ -1131,7 +1139,7 @@
             <tbody>${res.steps.map((s, i) => `
               <tr>
                 <td class="primary-cell">${i + 1}. ${esc(s.label)}${(s.equipmentName && s.equipmentName !== s.label) || s.temp ? `<div class="small muted">${esc([s.equipmentName !== s.label ? s.equipmentName : '', s.temp ? `${qtyFmt(s.temp)}°F` : ''].filter(Boolean).join(' · '))}</div>` : ''}</td>
-                <td class="num" data-label="Loads">${s.scaling === 'loads' ? s.runs : ''}</td>
+                <td class="num" data-label="Loads">${s.scaling === 'loads' ? `${s.runs}${s.fill != null ? `<div class="small muted">${Math.round(s.fill * 100)}% full</div>` : ''}` : ''}</td>
                 <td class="num" data-label="Time">${s.scaling === 'storage' ? `${qtyFmt(s.days)} ${s.days === 1 ? 'day' : 'days'}<div class="small muted">${pct(s.share * 100)} of space</div>` : s.hours ? qtyFmt(s.hours) + ' h' : ''}</td>
                 <td data-label="Fuel">${s.energy.map(e => `${qtyFmt(e.qty)} ${esc(e.unit)} ${esc(e.name)}`).join('<br>')}</td>
                 <td class="num" data-label="Labour">${s.laborHours ? qtyFmt(s.laborHours) + ' h' : ''}</td>

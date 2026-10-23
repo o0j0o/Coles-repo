@@ -216,3 +216,19 @@ test('fuel burn rate follows the cooking temperature', () => {
   near(run(400)[1].qty, 4);   // a typed-in rate is kept whatever the temperature
   near(run(400)[0].cost, 14 * 1.5);
 });
+
+test('load steps report how full the loads are', () => {
+  const recipe = { yield_qty: 2, yield_unit: 'kg', steps: [{ label: 'Smoke', hours: 3, scaling: 'loads', load_capacity: 10, load_unit: 'kg',
+    energy: [{ energy_id: 2, qty: 2, per: 'hour' }] }] };
+  const run = scale => C.computeRecipe({ recipe, scale, energyById: ens }).steps[0];
+  const small = run();
+  assert.equal(small.runs, 1);
+  near(small.fill, 0.2);
+  near(small.fits, 10);
+  near(small.energy[0].qty, 6);           // a part-empty smoker burns a full run's fuel
+  near(run({ mode: 'output', qty: 10, unit: 'kg' }).energy[0].qty, 6); // five times the food, same fuel
+  const two = run({ mode: 'output', qty: 12, unit: 'kg' });
+  assert.equal(two.runs, 2);
+  near(two.fill, 0.6);
+  near(two.fits, 20);
+});
