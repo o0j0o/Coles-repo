@@ -118,7 +118,7 @@ function seed(db) {
     name: 'Sample: Smoked beef jerky', product: 'jerky', yield_qty: 2, yield_unit: 'kg',
     pack_name: 'pouch', pack_qty: 100, pack_unit: 'g', sell_price: 22,
     description: '5 kg of trimmed beef makes about 2 kg of jerky.',
-    method: '1. Trim and slice the beef 5 mm thick against the grain.\n2. Mix the marinade and cure, coat the beef, and refrigerate overnight.\n3. Smoke, then finish in the dehydrator until dry.\n4. Cool, vacuum pack and label.',
+    method: '1. Trim and slice the beef 5 mm thick against the grain.\n2. Mix the marinade and cure, coat the beef, and refrigerate overnight.\n3. Lay the strips on the Traeger racks and smoke at 180°F until dry but still bendable.\n4. Cool, vacuum pack and label.',
   }, [
     ['beef', 5, 'kg'], ['soy', 500, 'ml'], ['worc', 250, 'ml'], ['sugar', 150, 'g'], ['pepper', 20, 'g'],
     ['garlic', 30, 'g'], ['bonnet', 50, 'g'], ['cure', 12.5, 'g', 'batch', '2.5 g per kg of meat'],
@@ -126,8 +126,7 @@ function seed(db) {
   ], [
     { label: 'Slice and mix marinade', hours: 0, scaling: 'linear', labor: 1.5 },
     { label: 'Marinate overnight', equip: 'fridge', scaling: 'storage', days: 1, store: 6, storeUnit: 'kg' },
-    { label: 'Smoke', equip: 'pellet', hours: 3, temp: 180, scaling: 'loads', cap: 5, capUnit: 'kg', labor: 0.5 },
-    { label: 'Dry', equip: 'dehyd', hours: 5, scaling: 'loads', cap: 1.5, capUnit: 'kg', labor: 0.25 },
+    { label: 'Smoke until dry', equip: 'pellet', hours: 5, temp: 180, scaling: 'loads', cap: 5, capUnit: 'kg', labor: 0.75 },
     { label: 'Vacuum pack', equip: 'sealer', hours: 0.5, scaling: 'linear', labor: 0.5 },
   ]);
 
