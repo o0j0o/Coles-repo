@@ -71,7 +71,8 @@ function seed(db) {
   addIng('pepper', 'Black pepper, coarse', 'spice', 500, 'g', 30, 100, 0.45);
   addIng('soy', 'Soy sauce', 'liquid', 1, 'L', 10, 100, 1.15);
   addIng('worc', 'Worcestershire sauce', 'liquid', 1, 'L', 12, 100, 1.1);
-  addIng('cure', 'Prague powder #1 (curing salt)', 'cure', 500, 'g', 25, 100, 1.2, 'Common guideline: 2.5 g per kg of meat. Always check against your approved process.');
+  addIng('cure', 'Prague Powder #1 (pink curing salt)', 'cure', 1, 'lb', 46, 100, 1.2,
+    'BBD 46 per 1 lb (USD 23). Common guideline: 2.5 g per kg of meat. Always check against your approved process.');
   addIng('beef', 'Beef eye of round', 'meat', 1, 'kg', 32, 90, null, 'Usable after trimming');
   addIng('brisket', 'Beef brisket flat', 'meat', 1, 'kg', 35, 80);
   addIng('rum', 'Gold rum', 'spirit', 1, 'L', 30, 100, 0.95);

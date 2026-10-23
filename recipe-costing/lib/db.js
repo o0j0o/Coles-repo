@@ -131,7 +131,7 @@ function migrate(db) {
 
 const DEFAULT_SETTINGS = {
   company_name: 'Black Belly Smokers',
-  currency_symbol: '$',
+  currency_symbol: 'BBD$',
   labor_rate: '0',
   target_margin_pct: '50',
   unit_system: 'metric',

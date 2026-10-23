@@ -1642,7 +1642,7 @@
           <h2>Business</h2>
           <div class="grid cols-2">
             ${field('Business name', 'company_name', s.company_name, { hint: 'Shown at the top and on batch sheets' })}
-            ${field('Currency symbol', 'currency_symbol', s.currency_symbol, { hint: 'e.g. $, BBD $, US$' })}
+            ${field('Currency symbol', 'currency_symbol', s.currency_symbol, { hint: 'e.g. BBD$, $, US$. The Barbados dollar is fixed at BBD 2 = USD 1' })}
           </div>
         </section>
         <section class="card">
