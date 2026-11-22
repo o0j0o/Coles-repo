@@ -73,6 +73,41 @@ The app is a single Node process with a SQLite file. It runs on any host that su
 
 **Backups**: use Settings, then Download backup, regularly. You can also copy `DATA_DIR`, which includes the uploaded drawings.
 
+## Running it on your lab with Docker
+
+**Quickest way**, on the lab machine with Docker installed (and Tailscale, if you use it):
+
+```bash
+git clone https://github.com/o0j0o/Coles-repo.git
+cd Coles-repo && ./install-lab.sh
+```
+
+The script asks for an app password (and, optionally, an Anthropic API key for Read a sketch), builds and starts the app, publishes it on your Tailscale network over HTTPS, and prints the address to open. **Run it again any time to update to the latest code and restart.** Your data is kept.
+
+- The app is on port **3001** of the lab machine, so it doesn't clash with the recipe app on 3000. To use another port, change `FENCE_PORT` in `.env` and run the script again.
+- With Tailscale HTTPS turned on, the address is `https://<lab-machine-name>.<your-tailnet>.ts.net:8443`.
+- The database and uploaded drawings are kept in the Docker volume `fence-estimator_fence-data`, so they survive restarts, rebuilds and updates. The container restarts on its own after a reboot.
+
+**Step by step**, without the script:
+
+```bash
+cd Coles-repo
+cp .env.example .env        # then edit .env: set APP_PASSWORD, and ANTHROPIC_API_KEY for Read a sketch
+docker compose up -d --build
+```
+
+**Updating**: `git pull` then `docker compose up -d --build` (or just run `./install-lab.sh`). A plain `git pull` is not enough: the container keeps running the code it was built with until it is rebuilt.
+
+**Moving from a fence app container you set up by hand**: the script tells you if it finds one. That container keeps its own old code and data. In the old app, use Settings, Download backup. In the new app, use Settings, Restore with that file. Then stop the old one with `docker stop <name> && docker update --restart=no <name>`.
+
+**Logs**: `docker compose logs -f`
+
+**Copy the whole data folder** (database and drawings):
+
+```bash
+docker compose cp fence:/data ./fence-backup-$(date +%F)
+```
+
 ## How the post count works
 
 For each run, the fence length minus any gate widths is divided by the post spacing and rounded up to give the number of sections. Each gate splits a run, which adds one section and two gate posts. Each run has two ends. Where runs meet at a corner they share one corner post, and a closed shape has no end posts. Every other post is a line post. When gates are in the middle of a run, the count can be one section high, which errs on the side of having enough material.
@@ -90,4 +125,7 @@ public/js/layout.js  Drawing/measuring tool
 public/js/app.js     Screens: estimates, quote, order list, materials, suppliers, fence types, settings
 public/css/app.css   Mobile-first styles, print styles for quotes
 test/                Calculation, API and sketch-reader tests
+Dockerfile           Container image
+docker-compose.yml   Runs the container with a data volume (port 3001)
+install-lab.sh       One-step install and update on a lab machine
 ```

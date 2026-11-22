@@ -1,0 +1,10 @@
+node_modules
+data
+test
+recipe-costing
+.env
+.env.example
+.git
+*.md
+install-lab.sh
+docker-compose.yml

@@ -1,0 +1,20 @@
+name: fence-estimator
+
+services:
+  fence:
+    build: .
+    image: fence-estimator:latest
+    container_name: fence-estimator
+    restart: unless-stopped
+    ports:
+      - "${FENCE_PORT:-3001}:3000"
+    environment:
+      APP_PASSWORD: ${APP_PASSWORD:?Set APP_PASSWORD in a .env file next to this one}
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      TZ: ${TZ:-America/Barbados}
+    volumes:
+      - fence-data:/data
+
+volumes:
+  fence-data:
