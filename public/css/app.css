@@ -67,7 +67,7 @@ h3 { font-size: 1rem; }
   background: var(--primary); color: var(--primary-ink);
 }
 .brand { display: flex; align-items: center; gap: .5rem; color: inherit; text-decoration: none; font-weight: 700; font-size: 1.05rem; min-width: 0; }
-.brand svg { width: 26px; height: 26px; flex: none; }
+.brand svg { width: 28px; height: 32px; flex: none; overflow: visible; }
 .brand span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .desk-nav { display: none; margin-left: auto; gap: .25rem; }
 .desk-nav a { color: inherit; text-decoration: none; padding: .45rem .8rem; border-radius: 8px; opacity: .85; font-weight: 500; }
